@@ -46,7 +46,7 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Deliverable**
 - End-to-end flow: open → search → select → install.
 
-## Slice 3 — Popular-by-default
+## Slice 3 — Popular-by-default (done)
 
 **Goal**: show popular skills immediately on open (empty query).
 

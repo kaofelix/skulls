@@ -55,6 +55,11 @@ type searchResultMsg struct {
 	err    error
 }
 
+type popularResultMsg struct {
+	skills []skillsapi.Skill
+	err    error
+}
+
 type triggerSearchMsg struct {
 	seq   int
 	query string
@@ -69,6 +74,10 @@ type searchModel struct {
 	searching bool
 	searchErr error
 	spinner   spinner.Model
+
+	popularLoading bool
+	popularErr     error
+	popularItems   []list.Item
 
 	result SearchResult
 }
@@ -100,7 +109,8 @@ func newSearchModel() searchModel {
 }
 
 func (m searchModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.spinner.Tick)
+	m.popularLoading = true
+	return tea.Batch(textinput.Blink, m.spinner.Tick, doPopular(m.client, 50))
 }
 
 func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -138,6 +148,20 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchSeq++
 			q := strings.TrimSpace(m.input.Value())
 			m.searchErr = nil
+
+			if q == "" {
+				m.searching = false
+				// Show popular-by-default.
+				if m.popularItems != nil {
+					m.results.SetItems(m.popularItems)
+				}
+				if !m.popularLoading && m.popularItems == nil {
+					m.popularLoading = true
+					return m, tea.Batch(inputCmd, listCmd, doPopular(m.client, 50))
+				}
+				return m, tea.Batch(inputCmd, listCmd)
+			}
+
 			if len([]rune(q)) < 2 {
 				m.searching = false
 				m.results.SetItems([]list.Item{})
@@ -171,6 +195,19 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results.SetItems(items)
 		return m, nil
 
+	case popularResultMsg:
+		m.popularLoading = false
+		m.popularErr = msg.err
+		items := make([]list.Item, 0, len(msg.skills))
+		for _, s := range msg.skills {
+			items = append(items, skillItem{s: s})
+		}
+		m.popularItems = items
+		if strings.TrimSpace(m.input.Value()) == "" {
+			m.results.SetItems(m.popularItems)
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -184,17 +221,26 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m searchModel) View() string {
 	q := strings.TrimSpace(m.input.Value())
 	status := ""
-	if len([]rune(q)) > 0 && len([]rune(q)) < 2 {
+
+	if q == "" {
+		switch {
+		case m.popularLoading:
+			status = m.spinner.View() + " Popular…"
+		case m.popularErr != nil:
+			status = "Error loading popular: " + m.popularErr.Error()
+		default:
+			status = "Popular • Type to search • Enter to install • Esc to quit"
+		}
+	} else if len([]rune(q)) < 2 {
 		status = "Type at least 2 characters to search."
-	}
-	if m.searching {
-		status = m.spinner.View() + " Searching…"
-	}
-	if m.searchErr != nil {
-		status = "Error: " + m.searchErr.Error()
-	}
-	if status == "" {
-		status = "Enter to install • Esc to quit"
+	} else {
+		if m.searching {
+			status = m.spinner.View() + " Searching…"
+		} else if m.searchErr != nil {
+			status = "Error: " + m.searchErr.Error()
+		} else {
+			status = "Enter to install • Esc to quit"
+		}
 	}
 
 	// Intentionally no trailing newline: if we exceed terminal height by one line,
@@ -214,5 +260,15 @@ func doSearch(client skillsapi.Client, query string, limit int, seq int) tea.Cmd
 
 		skills, err := client.Search(ctx, query, limit)
 		return searchResultMsg{seq: seq, skills: skills, err: err}
+	}
+}
+
+func doPopular(client skillsapi.Client, limit int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		skills, err := client.Popular(ctx, limit)
+		return popularResultMsg{skills: skills, err: err}
 	}
 }

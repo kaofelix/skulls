@@ -44,4 +44,5 @@ go build ./cmd/skulls
 
 Notes:
 - For now, Skulls expects skills to live at `skills/<skill-id>/SKILL.md` in the repo.
-- In search mode, Skulls shows a small install progress UI and then exits with a final “Installed …” message.
+- In search mode, Skulls shows popular skills by default (empty query).
+- It then shows a small install progress UI and exits with a final “Installed …” message.
