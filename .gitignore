@@ -1,0 +1,11 @@
+# binaries
+skulls
+skulls.exe
+
+# go
+*.test
+*.out
+/vendor/
+
+# editor
+.DS_Store
