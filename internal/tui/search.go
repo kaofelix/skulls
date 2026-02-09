@@ -156,8 +156,8 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowW = msg.Width
 		m.windowH = msg.Height
 
-		// Layout: input (1 line) + status (1 line) + body.
-		m.bodyH = msg.Height - 2
+		// Layout: input + blank line + status + blank line + body.
+		m.bodyH = msg.Height - 4
 		if m.bodyH < 1 {
 			m.bodyH = 1
 		}
@@ -382,7 +382,7 @@ func (m searchModel) View() string {
 	// Intentionally no trailing newline: if we exceed terminal height by one line,
 	// Bubble Tea will clip the top, which can hide the input line.
 	return fmt.Sprintf(
-		"%s\n%s\n%s",
+		"%s\n\n%s\n\n%s",
 		m.input.View(),
 		status,
 		body,
@@ -393,8 +393,8 @@ func (m searchModel) isInPreviewPane(msg tea.MouseMsg) bool {
 	if m.previewPaneW <= 0 {
 		return false
 	}
-	// Layout: input + status take 2 rows.
-	if msg.Y < 2 {
+	// Layout: input + blank line + status + blank line take 4 rows.
+	if msg.Y < 4 {
 		return false
 	}
 	// List is fixed width from the left.

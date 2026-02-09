@@ -78,7 +78,24 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Rendering**
 - Render Markdown → ANSI using Glamour.
 
-## Slice 5 — Remember the target directory
+## Slice 5 — Non-interactive add mode (vercel-style)
+
+**Goal**: enable installing from a source repo without the full-screen search UI.
+
+**UX**
+- Command installs one or more skills discovered in the repository by parsing `SKILL.md` frontmatter.
+- Examples:
+  - `skulls add <source> --dir <target-dir> --skill <name>`
+  - `skulls add <source> --dir <target-dir> --all`
+  - `skulls add <source> --list`
+  - Optional shorthand: `skulls add owner/repo@skill-name --dir <target-dir>`
+
+**Behavior**
+- Clone repo (unless local path).
+- Discover skills by scanning for `SKILL.md` (similar to vercel-labs/skills).
+- Install by matching frontmatter `name`.
+
+## Slice 6 — Remember the target directory
 
 **Goal**: don’t require `--dir` every time.
 
@@ -92,6 +109,6 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 ## Hardening / polish (post-slices)
 
 - Collision handling: overwrite / rename / cancel.
-- Better repo layout detection when `skills/<skill-id>` doesn’t exist (search for `SKILL.md` and match frontmatter name).
+- Better repo layout detection for non-GitHub sources and non-standard layouts beyond `skills/**/SKILL.md`.
 - Support more source formats safely.
 - Telemetry: likely no (unless explicitly desired).
