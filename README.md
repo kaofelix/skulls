@@ -26,13 +26,16 @@ What it does:
 Notes:
 - The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you’ll need to re-stage and commit again.
 
-## Slice 1 (current): install a skill into any target directory
+## Slices 1–2: install + interactive search UI
 
 ```bash
 # build
 go build ./cmd/skulls
 
-# install a skill
+# interactive search + install (requires --dir for now)
+./skulls --dir ~/.pi/agent/skills
+
+# direct install
 ./skulls add obra/superpowers using-git-worktrees --dir ~/.pi/agent/skills
 
 # overwrite
@@ -41,4 +44,4 @@ go build ./cmd/skulls
 
 Notes:
 - For now, Skulls expects skills to live at `skills/<skill-id>/SKILL.md` in the repo.
-- Running `skulls` with no args will eventually open the interactive search UI.
+- In search mode, Skulls shows a small install progress UI and then exits with a final “Installed …” message.

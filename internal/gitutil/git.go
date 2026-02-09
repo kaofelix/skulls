@@ -3,6 +3,7 @@ package gitutil
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,8 +50,12 @@ func looksLikePath(s string) bool {
 }
 
 func CloneShallow(url string, dest string) error {
+	return CloneShallowTo(url, dest, os.Stdout, os.Stderr)
+}
+
+func CloneShallowTo(url string, dest string, stdout io.Writer, stderr io.Writer) error {
 	cmd := exec.Command("git", "clone", "--depth", "1", url, dest)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }

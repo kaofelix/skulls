@@ -3,6 +3,7 @@ package install
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,9 +12,35 @@ import (
 	"github.com/kaofelix/skulls/internal/gitutil"
 )
 
+type Step string
+
+const (
+	StepNormalize Step = "normalize"
+	StepClone     Step = "clone"
+	StepVerify    Step = "verify"
+	StepRemove    Step = "remove"
+	StepCopy      Step = "copy"
+)
+
+type Event struct {
+	Step    Step
+	Message string
+	Done    bool
+}
+
+type ProgressFunc func(Event)
+
 type Options struct {
 	TargetDir string
 	Force     bool
+
+	// Progress, if set, is called as the installer advances.
+	Progress ProgressFunc
+
+	// GitStdout/GitStderr control where `git clone` output goes.
+	// If nil, defaults to os.Stdout/os.Stderr.
+	GitStdout io.Writer
+	GitStderr io.Writer
 }
 
 func InstallSkill(source string, skillID string, opts Options) (string, error) {
@@ -38,12 +65,39 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 	defer os.RemoveAll(tmp)
 
 	repoDir := filepath.Join(tmp, "repo")
+
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepNormalize, Message: "Normalizing source…"})
+	}
 	cloneURL, err := gitutil.NormalizeSourceToGitURL(source)
 	if err != nil {
 		return "", err
 	}
-	if err := gitutil.CloneShallow(cloneURL, repoDir); err != nil {
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepNormalize, Message: "Normalizing source…", Done: true})
+	}
+
+	stdout := opts.GitStdout
+	stderr := opts.GitStderr
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepClone, Message: "Downloading repository…"})
+	}
+	if err := gitutil.CloneShallowTo(cloneURL, repoDir, stdout, stderr); err != nil {
 		return "", err
+	}
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepClone, Message: "Downloading repository…", Done: true})
+	}
+
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepVerify, Message: "Verifying skill layout…"})
 	}
 
 	// For now we follow the skills.sh convention: skills/<skillID>/SKILL.md
@@ -57,20 +111,36 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 		return "", fmt.Errorf("SKILL.md not found at %s", filepath.ToSlash(filepath.Join("skills", skillID, "SKILL.md")))
 	}
 
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepVerify, Message: "Verifying skill layout…", Done: true})
+	}
+
 	folderName := sanitizeName(skillID)
 	installPath := filepath.Join(targetBase, folderName)
 
-	if _, err := os.Stat(installPath); err == nil {
+	if _, statErr := os.Stat(installPath); statErr == nil {
 		if !opts.Force {
 			return "", fmt.Errorf("target already exists: %s (use --force to overwrite)", installPath)
+		}
+		if opts.Progress != nil {
+			opts.Progress(Event{Step: StepRemove, Message: "Removing existing installation…"})
 		}
 		if err := os.RemoveAll(installPath); err != nil {
 			return "", err
 		}
+		if opts.Progress != nil {
+			opts.Progress(Event{Step: StepRemove, Message: "Removing existing installation…", Done: true})
+		}
 	}
 
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepCopy, Message: "Installing skill files…"})
+	}
 	if err := fsutil.CopyDir(skillDir, installPath); err != nil {
 		return "", err
+	}
+	if opts.Progress != nil {
+		opts.Progress(Event{Step: StepCopy, Message: "Installing skill files…", Done: true})
 	}
 
 	return installPath, nil

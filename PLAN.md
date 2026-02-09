@@ -30,7 +30,7 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Notes**
 - `--dir` required for now.
 
-## Slice 2 — Full-screen TUI search mode (no preview yet)
+## Slice 2 — Full-screen TUI search mode (done; no preview yet)
 
 **Goal**: `skulls` (no args) launches an interactive search UI.
 
