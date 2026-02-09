@@ -20,8 +20,9 @@ type Skill struct {
 }
 
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	BaseURL       string
+	GitHubRawBase string
+	HTTP          *http.Client
 }
 
 type searchResponse struct {

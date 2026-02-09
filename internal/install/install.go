@@ -100,15 +100,9 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 		opts.Progress(Event{Step: StepVerify, Message: "Verifying skill layout…"})
 	}
 
-	// For now we follow the skills.sh convention: skills/<skillID>/SKILL.md
-	skillDir := filepath.Join(repoDir, "skills", skillID)
-	if fi, err := os.Stat(skillDir); err != nil || !fi.IsDir() {
-		return "", fmt.Errorf("skill directory not found in repo: %s", filepath.ToSlash(filepath.Join("skills", skillID)))
-	}
-
-	skillMd := filepath.Join(skillDir, "SKILL.md")
-	if fi, err := os.Stat(skillMd); err != nil || fi.IsDir() {
-		return "", fmt.Errorf("SKILL.md not found at %s", filepath.ToSlash(filepath.Join("skills", skillID, "SKILL.md")))
+	skillDir, err := resolveSkillDir(repoDir, skillID)
+	if err != nil {
+		return "", err
 	}
 
 	if opts.Progress != nil {

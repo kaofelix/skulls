@@ -2,14 +2,19 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kaofelix/skulls/internal/skillsapi"
 )
@@ -22,7 +27,7 @@ type SearchResult struct {
 // RunSearch runs the interactive search UI in the alt screen and returns the selected skill.
 func RunSearch() (SearchResult, error) {
 	m := newSearchModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := p.Run()
 	if err != nil {
 		return SearchResult{}, err
@@ -65,6 +70,13 @@ type triggerSearchMsg struct {
 	query string
 }
 
+type previewResultMsg struct {
+	seq int
+	key string
+	md  string
+	err error
+}
+
 type searchModel struct {
 	client skillsapi.Client
 
@@ -79,8 +91,31 @@ type searchModel struct {
 	popularErr     error
 	popularItems   []list.Item
 
+	// Layout
+	windowW      int
+	windowH      int
+	bodyH        int
+	listW        int
+	previewPaneW int
+
+	// Preview
+	previewSeq      int
+	previewLoading  bool
+	previewKey      string
+	previewMarkdown string
+	previewRendered string
+	previewErr      error
+	previewCache    map[string]string // key -> raw markdown
+	previewVP       viewport.Model
+	lastSelKey      string
+
 	result SearchResult
 }
+
+const (
+	fixedListWidth      = 48
+	minPreviewPaneWidth = 30
+)
 
 func newSearchModel() searchModel {
 	ti := textinput.New()
@@ -101,10 +136,12 @@ func newSearchModel() searchModel {
 	l.Title = ""
 
 	return searchModel{
-		client:  skillsapi.Client{},
-		input:   ti,
-		results: l,
-		spinner: s,
+		client:       skillsapi.Client{},
+		input:        ti,
+		results:      l,
+		spinner:      s,
+		previewCache: map[string]string{},
+		previewVP:    viewport.New(0, 0),
 	}
 }
 
@@ -116,13 +153,61 @@ func (m searchModel) Init() tea.Cmd {
 func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Layout: input (1 line) + status (1 line) + results.
-		height := msg.Height - 2
-		if height < 1 {
-			height = 1
+		m.windowW = msg.Width
+		m.windowH = msg.Height
+
+		// Layout: input (1 line) + status (1 line) + body.
+		m.bodyH = msg.Height - 2
+		if m.bodyH < 1 {
+			m.bodyH = 1
 		}
-		m.results.SetSize(msg.Width, height)
+
+		m.listW = fixedListWidth
+		if msg.Width < fixedListWidth+minPreviewPaneWidth {
+			m.listW = msg.Width
+			m.previewPaneW = 0
+		} else {
+			if m.listW > msg.Width {
+				m.listW = msg.Width
+			}
+			m.previewPaneW = msg.Width - m.listW
+			if m.previewPaneW < 0 {
+				m.previewPaneW = 0
+			}
+		}
+
+		m.results.SetSize(m.listW, m.bodyH)
+
+		previewW := m.previewPaneW - 2 // match right pane padding
+		if previewW < 0 {
+			previewW = 0
+		}
+		m.previewVP.Width = previewW
+		m.previewVP.Height = m.bodyH
+
+		// If we already have preview markdown, re-render for the new width.
+		m.rerenderPreview()
+
 		return m, nil
+
+	case tea.MouseMsg:
+		oldSelKey := m.selectedKey()
+
+		// If scrolling in the preview pane, scroll preview instead of the list.
+		if m.isInPreviewPane(msg) && msg.Action == tea.MouseActionPress && tea.MouseEvent(msg).IsWheel() {
+			var cmd tea.Cmd
+			m.previewVP, cmd = m.previewVP.Update(msg)
+			return m, cmd
+		}
+
+		// Otherwise let the list handle the mouse event (wheel changes selection, clicks, etc.).
+		var listCmd tea.Cmd
+		m.results, listCmd = m.results.Update(msg)
+		newSelKey := m.selectedKey()
+		if newSelKey != "" && newSelKey != oldSelKey {
+			return m, tea.Batch(listCmd, m.ensurePreviewForSelection())
+		}
+		return m, listCmd
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -135,13 +220,45 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Preview scrolling (keep list navigation separate).
+		if m.previewPaneW > 0 && m.previewErr == nil && !m.previewLoading && strings.TrimSpace(m.previewRendered) != "" {
+			switch msg.String() {
+			case "pgdown":
+				m.previewVP.PageDown()
+				return m, nil
+			case "pgup":
+				m.previewVP.PageUp()
+				return m, nil
+			case "ctrl+d":
+				m.previewVP.HalfPageDown()
+				return m, nil
+			case "ctrl+u":
+				m.previewVP.HalfPageUp()
+				return m, nil
+			case "home":
+				m.previewVP.GotoTop()
+				return m, nil
+			case "end":
+				m.previewVP.GotoBottom()
+				return m, nil
+			}
+		}
+
 		oldQuery := m.input.Value()
+		oldSelKey := m.selectedKey()
 
 		var inputCmd tea.Cmd
 		m.input, inputCmd = m.input.Update(msg)
 
 		var listCmd tea.Cmd
 		m.results, listCmd = m.results.Update(msg)
+
+		// Selection changed (up/down) -> update preview.
+		newSelKey := m.selectedKey()
+		var previewCmd tea.Cmd
+		if newSelKey != "" && newSelKey != oldSelKey {
+			previewCmd = m.ensurePreviewForSelection()
+		}
 
 		if m.input.Value() != oldQuery {
 			// If query changed, debounce a search.
@@ -154,17 +271,19 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Show popular-by-default.
 				if m.popularItems != nil {
 					m.results.SetItems(m.popularItems)
+					previewCmd = m.ensurePreviewForSelection()
 				}
 				if !m.popularLoading && m.popularItems == nil {
 					m.popularLoading = true
-					return m, tea.Batch(inputCmd, listCmd, doPopular(m.client, 50))
+					return m, tea.Batch(inputCmd, listCmd, previewCmd, doPopular(m.client, 50))
 				}
-				return m, tea.Batch(inputCmd, listCmd)
+				return m, tea.Batch(inputCmd, listCmd, previewCmd)
 			}
 
 			if len([]rune(q)) < 2 {
 				m.searching = false
 				m.results.SetItems([]list.Item{})
+				m.clearPreview()
 				return m, tea.Batch(inputCmd, listCmd)
 			}
 			seq := m.searchSeq
@@ -173,7 +292,7 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}))
 		}
 
-		return m, tea.Batch(inputCmd, listCmd)
+		return m, tea.Batch(inputCmd, listCmd, previewCmd)
 
 	case triggerSearchMsg:
 		if msg.seq != m.searchSeq {
@@ -193,7 +312,7 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items = append(items, skillItem{s: s})
 		}
 		m.results.SetItems(items)
-		return m, nil
+		return m, tea.Batch(m.ensurePreviewForSelection())
 
 	case popularResultMsg:
 		m.popularLoading = false
@@ -205,14 +324,29 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.popularItems = items
 		if strings.TrimSpace(m.input.Value()) == "" {
 			m.results.SetItems(m.popularItems)
+			return m, tea.Batch(m.ensurePreviewForSelection())
 		}
+		return m, nil
+
+	case previewResultMsg:
+		if msg.seq != m.previewSeq {
+			return m, nil
+		}
+		m.previewLoading = false
+		m.previewErr = msg.err
+		m.previewKey = msg.key
+		m.previewMarkdown = msg.md
+		if msg.err == nil {
+			m.previewCache[msg.key] = msg.md
+		}
+		m.previewVP.GotoTop()
+		m.rerenderPreview()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
-
 	}
 
 	return m, nil
@@ -243,14 +377,178 @@ func (m searchModel) View() string {
 		}
 	}
 
+	body := m.bodyView()
+
 	// Intentionally no trailing newline: if we exceed terminal height by one line,
 	// Bubble Tea will clip the top, which can hide the input line.
 	return fmt.Sprintf(
 		"%s\n%s\n%s",
 		m.input.View(),
 		status,
-		m.results.View(),
+		body,
 	)
+}
+
+func (m searchModel) isInPreviewPane(msg tea.MouseMsg) bool {
+	if m.previewPaneW <= 0 {
+		return false
+	}
+	// Layout: input + status take 2 rows.
+	if msg.Y < 2 {
+		return false
+	}
+	// List is fixed width from the left.
+	return msg.X >= m.listW
+}
+
+func (m searchModel) bodyView() string {
+	left := lipgloss.NewStyle().Width(m.listW).MaxWidth(m.listW).Render(m.results.View())
+	if m.previewPaneW <= 0 {
+		return left
+	}
+
+	right := m.previewView()
+
+	// Create a small gap via padding on the right pane.
+	rightStyled := lipgloss.NewStyle().
+		Width(m.previewPaneW).
+		MaxWidth(m.previewPaneW).
+		MaxHeight(m.bodyH).
+		PaddingLeft(2).
+		Render(right)
+
+	leftStyled := lipgloss.NewStyle().
+		Width(m.listW).
+		MaxWidth(m.listW).
+		MaxHeight(m.bodyH).
+		Render(m.results.View())
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, rightStyled)
+}
+
+func (m searchModel) previewView() string {
+	if m.selectedKey() == "" {
+		return ""
+	}
+
+	if m.previewLoading {
+		return m.spinner.View() + " Loading preview…"
+	}
+
+	if m.previewErr != nil {
+		if errors.Is(m.previewErr, skillsapi.ErrPreviewUnavailable) {
+			return "Preview unavailable"
+		}
+		return "Preview unavailable: " + m.previewErr.Error()
+	}
+
+	if strings.TrimSpace(m.previewRendered) == "" {
+		return "Preview unavailable"
+	}
+	return m.previewVP.View()
+}
+
+func (m *searchModel) clearPreview() {
+	m.previewLoading = false
+	m.previewKey = ""
+	m.previewMarkdown = ""
+	m.previewRendered = ""
+	m.previewErr = nil
+	m.previewVP.GotoTop()
+	m.previewVP.SetContent("")
+	m.lastSelKey = ""
+}
+
+func (m *searchModel) rerenderPreview() {
+	if m.previewPaneW <= 0 {
+		m.previewRendered = ""
+		m.previewVP.SetContent("")
+		return
+	}
+	if m.previewMarkdown == "" {
+		return
+	}
+	wrap := wrapWidthForPreview(m.previewPaneW)
+	rendered, err := renderMarkdownANSI(m.previewMarkdown, wrap)
+	if err != nil {
+		// Fall back to raw markdown if rendering fails.
+		m.previewRendered = m.previewMarkdown
+		m.previewVP.SetContent(m.previewRendered)
+		return
+	}
+	m.previewRendered = rendered
+	m.previewVP.SetContent(m.previewRendered)
+}
+
+func (m *searchModel) selectedSkill() (skillsapi.Skill, bool) {
+	it, ok := m.results.SelectedItem().(skillItem)
+	if !ok {
+		return skillsapi.Skill{}, false
+	}
+	return it.s, true
+}
+
+func (m *searchModel) selectedKey() string {
+	s, ok := m.selectedSkill()
+	if !ok {
+		return ""
+	}
+	return previewKeyForSkill(s)
+}
+
+func previewKeyForSkill(s skillsapi.Skill) string {
+	return strings.TrimSpace(s.Source) + "|" + strings.TrimSpace(s.SkillID)
+}
+
+func (m *searchModel) ensurePreviewForSelection() tea.Cmd {
+	s, ok := m.selectedSkill()
+	if !ok {
+		m.clearPreview()
+		return nil
+	}
+
+	key := previewKeyForSkill(s)
+	m.lastSelKey = key
+
+	if md, ok := m.previewCache[key]; ok {
+		m.previewLoading = false
+		m.previewErr = nil
+		m.previewKey = key
+		m.previewMarkdown = md
+		m.previewVP.GotoTop()
+		m.rerenderPreview()
+		return nil
+	}
+
+	m.previewSeq++
+	seq := m.previewSeq
+	m.previewLoading = true
+	m.previewErr = nil
+	m.previewKey = key
+	m.previewMarkdown = ""
+	m.previewRendered = ""
+	m.previewVP.GotoTop()
+	m.previewVP.SetContent("")
+	return doPreview(m.client, s, key, seq)
+}
+
+func renderMarkdownANSI(md string, wrap int) (string, error) {
+	// Avoid glamour's auto style here: it calls termenv.HasDarkBackground(), which
+	// queries the terminal and can cause escape sequence responses to land in the
+	// Bubble Tea text input.
+	style := strings.TrimSpace(os.Getenv("GLAMOUR_STYLE"))
+	if style == "" || strings.EqualFold(style, "auto") {
+		style = "dark"
+	}
+
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle(style),
+		glamour.WithWordWrap(wrap),
+	)
+	if err != nil {
+		return "", err
+	}
+	return r.Render(md)
 }
 
 func doSearch(client skillsapi.Client, query string, limit int, seq int) tea.Cmd {
@@ -270,5 +568,15 @@ func doPopular(client skillsapi.Client, limit int) tea.Cmd {
 
 		skills, err := client.Popular(ctx, limit)
 		return popularResultMsg{skills: skills, err: err}
+	}
+}
+
+func doPreview(client skillsapi.Client, skill skillsapi.Skill, key string, seq int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+
+		md, err := client.FetchSkillMarkdown(ctx, skill)
+		return previewResultMsg{seq: seq, key: key, md: md, err: err}
 	}
 }

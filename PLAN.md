@@ -30,7 +30,7 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Notes**
 - `--dir` required for now.
 
-## Slice 2 — Full-screen TUI search mode (done; no preview yet)
+## Slice 2 — Full-screen TUI search mode (done)
 
 **Goal**: `skulls` (no args) launches an interactive search UI.
 
@@ -60,7 +60,7 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Tests**
 - Unit test parser against a saved HTML fixture.
 
-## Slice 4 — Preview pane with highlighted Markdown
+## Slice 4 — Preview pane with highlighted Markdown (done)
 
 **Goal**: add a right-side preview pane rendering `SKILL.md`.
 
@@ -69,14 +69,13 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 - On selection change: asynchronously load preview with caching.
 
 **Preview fetching (best-effort)**
-- Prefer raw GitHub fetch:
-  1) Determine default branch via GitHub API
-  2) Fetch:
-     - `https://raw.githubusercontent.com/<owner>/<repo>/<default-branch>/skills/<skill-id>/SKILL.md`
-- If it fails: show a friendly fallback; allow install anyway (clone will still work).
+- GitHub-only for now.
+- Raw fetch using the special ref `HEAD` (resolves to the default branch):
+  - `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/skills/<skill-id>/SKILL.md`
+- If it fails: show “Preview unavailable”; allow install anyway (clone will still work).
 
 **Rendering**
-- Render Markdown → ANSI using a terminal renderer (e.g. Glamour).
+- Render Markdown → ANSI using Glamour.
 
 ## Slice 5 — Remember the target directory
 

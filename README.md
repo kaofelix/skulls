@@ -26,7 +26,7 @@ What it does:
 Notes:
 - The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you’ll need to re-stage and commit again.
 
-## Slices 1–2: install + interactive search UI
+## Slices 1–4: install + interactive search UI + preview
 
 ```bash
 # build
@@ -45,4 +45,5 @@ go build ./cmd/skulls
 Notes:
 - For now, Skulls expects skills to live at `skills/<skill-id>/SKILL.md` in the repo.
 - In search mode, Skulls shows popular skills by default (empty query).
+- The right pane shows a highlighted Markdown preview of `SKILL.md` (best-effort; GitHub-only).
 - It then shows a small install progress UI and exits with a final “Installed …” message.
