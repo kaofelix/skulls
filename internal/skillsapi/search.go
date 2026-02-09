@@ -22,6 +22,7 @@ type Skill struct {
 type Client struct {
 	BaseURL       string
 	GitHubRawBase string
+	GitHubAPIBase string
 	HTTP          *http.Client
 }
 

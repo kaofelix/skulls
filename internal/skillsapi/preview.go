@@ -2,6 +2,7 @@ package skillsapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,10 +20,20 @@ var ErrPreviewUnavailable = errors.New("preview unavailable")
 
 var shorthandRepoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
+type githubTreeResponse struct {
+	Truncated bool `json:"truncated"`
+	Tree      []struct {
+		Path string `json:"path"`
+		Type string `json:"type"`
+	} `json:"tree"`
+}
+
 // FetchSkillMarkdown fetches the raw SKILL.md contents for a skill as best-effort.
 //
-// Currently GitHub-only. For GitHub repos, it uses raw.githubusercontent.com with
-// the special ref "HEAD" to resolve the default branch.
+// GitHub-only. Strategy:
+//  1. Fast path: try /skills/<skillID>/SKILL.md
+//  2. Fallback: if 404, list repo tree via GitHub API, fetch candidate SKILL.md files,
+//     parse frontmatter name, and return the one matching skillID.
 func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, error) {
 	owner, repo, ok := parseGitHubRepo(skill.Source)
 	if !ok {
@@ -32,44 +43,127 @@ func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, er
 		return "", fmt.Errorf("%w: empty skill id", ErrPreviewUnavailable)
 	}
 
-	rawBase := strings.TrimRight(strings.TrimSpace(c.GitHubRawBase), "/")
-	if rawBase == "" {
-		rawBase = "https://raw.githubusercontent.com"
-	}
-
 	httpClient := c.HTTP
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
-	u, err := url.Parse(rawBase)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+	rawBase := strings.TrimRight(strings.TrimSpace(c.GitHubRawBase), "/")
+	if rawBase == "" {
+		rawBase = "https://raw.githubusercontent.com"
 	}
 
-	// /<owner>/<repo>/HEAD/skills/<skill-id>/SKILL.md
-	u.Path = path.Join(u.Path, owner, repo, "HEAD", "skills", skill.SkillID, "SKILL.md")
+	apiBase := strings.TrimRight(strings.TrimSpace(c.GitHubAPIBase), "/")
+	if apiBase == "" {
+		apiBase = "https://api.github.com"
+	}
+
+	// Fast path.
+	primaryPath := path.Join("skills", skill.SkillID, "SKILL.md")
+	md, status, err := fetchGitHubRaw(ctx, httpClient, rawBase, owner, repo, primaryPath)
+	if err == nil {
+		return md, nil
+	}
+
+	// Only attempt fallback on 404. Other errors should just surface.
+	if status != http.StatusNotFound {
+		return "", err
+	}
+
+	paths, treeErr := fetchGitHubTreeSkillMdPaths(ctx, httpClient, apiBase, owner, repo)
+	if treeErr != nil {
+		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, treeErr)
+	}
+
+	for _, p := range paths {
+		candidate, _, rawErr := fetchGitHubRaw(ctx, httpClient, rawBase, owner, repo, p)
+		if rawErr != nil {
+			continue
+		}
+		name, ok := parseSkillNameFromFrontmatter(candidate)
+		if ok && name == skill.SkillID {
+			return candidate, nil
+		}
+	}
+
+	return "", ErrPreviewUnavailable
+}
+
+func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner, repo, relPath string) (string, int, error) {
+	u, err := url.Parse(rawBase)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+	}
+
+	// /<owner>/<repo>/HEAD/<relPath>
+	u.Path = path.Join(u.Path, owner, repo, "HEAD", relPath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("%w: %s", ErrPreviewUnavailable, resp.Status)
+		return "", resp.StatusCode, fmt.Errorf("%w: %s", ErrPreviewUnavailable, resp.Status)
 	}
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", resp.StatusCode, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
 	}
-	return string(b), nil
+	return string(b), resp.StatusCode, nil
+}
+
+func fetchGitHubTreeSkillMdPaths(ctx context.Context, httpClient *http.Client, apiBase, owner, repo string) ([]string, error) {
+	u, err := url.Parse(apiBase)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = path.Join(u.Path, "repos", owner, repo, "git", "trees", "HEAD")
+	q := u.Query()
+	q.Set("recursive", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("tree listing failed: %s", resp.Status)
+	}
+
+	var decoded githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, err
+	}
+
+	paths := make([]string, 0, 32)
+	for _, it := range decoded.Tree {
+		if it.Type != "blob" {
+			continue
+		}
+		if !strings.HasSuffix(it.Path, "SKILL.md") {
+			continue
+		}
+		// Prefer skills/* and root SKILL.md.
+		if it.Path == "SKILL.md" || strings.HasPrefix(it.Path, "skills/") {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths, nil
 }
 
 func parseGitHubRepo(source string) (owner, repo string, ok bool) {

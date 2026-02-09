@@ -70,9 +70,10 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 
 **Preview fetching (best-effort)**
 - GitHub-only for now.
-- Raw fetch using the special ref `HEAD` (resolves to the default branch):
+- First try raw fetch using the special ref `HEAD` (resolves to the default branch):
   - `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/skills/<skill-id>/SKILL.md`
-- If it fails: show “Preview unavailable”; allow install anyway (clone will still work).
+- If that 404s, fall back to GitHub’s Trees API to locate `SKILL.md` files and match by frontmatter `name`.
+- If it still fails: show “Preview unavailable”; allow install anyway (clone will still work).
 
 **Rendering**
 - Render Markdown → ANSI using Glamour.
