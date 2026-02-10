@@ -178,12 +178,13 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.results.SetSize(m.listW, m.bodyH)
 
-		previewW := m.previewPaneW - 2 // match right pane padding
-		if previewW < 0 {
-			previewW = 0
+		m.previewVP.Width = wrapWidthForPreview(m.previewPaneW)
+		// Reserve one line for a scroll indicator.
+		previewH := m.bodyH - 1
+		if previewH < 1 {
+			previewH = 1
 		}
-		m.previewVP.Width = previewW
-		m.previewVP.Height = m.bodyH
+		m.previewVP.Height = previewH
 
 		// If we already have preview markdown, re-render for the new width.
 		m.rerenderPreview()
@@ -426,6 +427,46 @@ func (m searchModel) bodyView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, rightStyled)
 }
 
+func (m searchModel) previewIndicatorLine() string {
+	w := m.previewVP.Width
+	if w <= 0 {
+		return ""
+	}
+
+	// Only show indicators if the content can actually scroll.
+	scrollable := m.previewVP.TotalLineCount() > m.previewVP.Height
+	if !scrollable {
+		return lipgloss.NewStyle().Width(w).Render("")
+	}
+
+	up := " "
+	if !m.previewVP.AtTop() {
+		up = "▲"
+	}
+	down := " "
+	if !m.previewVP.AtBottom() {
+		down = "▼"
+	}
+	pct := int(m.previewVP.ScrollPercent()*100 + 0.5)
+	core := fmt.Sprintf("%s %3d%% %s", up, pct, down)
+
+	// Build a centered bar like: ──── ▲  12% ▼ ────
+	core = " " + core + " "
+	fill := w - lipgloss.Width(core)
+	if fill < 0 {
+		fill = 0
+	}
+	left := fill / 2
+	right := fill - left
+	line := strings.Repeat("─", left) + core + strings.Repeat("─", right)
+
+	return lipgloss.NewStyle().
+		Width(w).
+		Align(lipgloss.Center).
+		Foreground(lipgloss.AdaptiveColor{Light: "#4a6a88", Dark: "#8aa4c8"}).
+		Render(line)
+}
+
 func (m searchModel) previewView() string {
 	if m.selectedKey() == "" {
 		return ""
@@ -445,7 +486,17 @@ func (m searchModel) previewView() string {
 	if strings.TrimSpace(m.previewRendered) == "" {
 		return "Preview unavailable"
 	}
-	return m.previewVP.View()
+
+	indicator := m.previewIndicatorLine()
+	previewBlock := m.previewVP.View() + "\n" + indicator
+
+	// Center the preview block in the available preview pane width.
+	availableW := m.previewPaneW - 2 // match right pane padding
+	if availableW < 0 {
+		availableW = 0
+	}
+	previewBlock = lipgloss.PlaceHorizontal(availableW, lipgloss.Center, previewBlock)
+	return previewBlock
 }
 
 func (m *searchModel) clearPreview() {
@@ -548,7 +599,14 @@ func renderMarkdownANSI(md string, wrap int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return r.Render(md)
+
+	rendered, err := r.Render(md)
+	if err != nil {
+		return "", err
+	}
+	// Glamour sometimes leads with newlines; drop them so content is top-aligned.
+	rendered = strings.TrimLeft(rendered, "\n")
+	return rendered, nil
 }
 
 func doSearch(client skillsapi.Client, query string, limit int, seq int) tea.Cmd {
