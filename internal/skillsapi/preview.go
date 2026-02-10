@@ -72,7 +72,7 @@ func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, er
 
 	paths, treeErr := fetchGitHubTreeSkillMdPaths(ctx, httpClient, apiBase, owner, repo)
 	if treeErr != nil {
-		return "", fmt.Errorf("%w: %v", ErrPreviewUnavailable, treeErr)
+		return "", fmt.Errorf("%w: %w", ErrPreviewUnavailable, treeErr)
 	}
 
 	for _, p := range paths {
@@ -92,7 +92,7 @@ func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, er
 func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner, repo, relPath string) (string, int, error) {
 	u, err := url.Parse(rawBase)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", 0, fmt.Errorf("%w: %w", ErrPreviewUnavailable, err)
 	}
 
 	// /<owner>/<repo>/HEAD/<relPath>
@@ -100,12 +100,12 @@ func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", 0, fmt.Errorf("%w: %w", ErrPreviewUnavailable, err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", 0, fmt.Errorf("%w: %w", ErrPreviewUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -115,7 +115,7 @@ func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", resp.StatusCode, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
+		return "", resp.StatusCode, fmt.Errorf("%w: %w", ErrPreviewUnavailable, err)
 	}
 	return string(b), resp.StatusCode, nil
 }
