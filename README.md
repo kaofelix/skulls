@@ -2,13 +2,55 @@
 
 Dead simple skills 💀
 
-## Status
+`skulls` installs skills from git repositories into a target directory.
 
-This repo is being built incrementally as vertical slices.
+## Commands
 
-See [PLAN.md](./PLAN.md) for the tracked plan and upcoming slices.
+### Interactive search
 
-## Git hooks (format + test)
+```bash
+skulls --dir <target-dir> [--force]
+```
+
+Behavior:
+- Empty query shows popular skills.
+- Queries with length >= 2 search via `https://skills.sh/api/search`.
+- The right pane previews the selected skill's `SKILL.md` (best-effort; GitHub sources only).
+- `Enter` installs the selected skill. `Esc` quits.
+
+### Add (direct install)
+
+```bash
+skulls add <source> <skill-id> --dir <target-dir> [--force]
+```
+
+`<source>` formats:
+- `owner/repo` (GitHub shorthand)
+- a git remote URL (`https://...`, `git@...`, `file:///...`)
+- a local path to a git repo
+
+## Install layout
+
+Installs to:
+
+```
+<target-dir>/<skill-id>/
+  SKILL.md
+  ...
+```
+
+Repository layout:
+- Skulls discovers skills by scanning `skills/**/SKILL.md` and matching YAML frontmatter `name: <skill-id>`.
+
+## Development
+
+### Build
+
+```bash
+go build ./cmd/skulls
+```
+
+### Git hooks (format + test)
 
 This repo uses [prek](https://prek.j178.dev/) (pre-commit compatible).
 
@@ -24,26 +66,4 @@ What it does:
 - On push: runs `go test ./...`.
 
 Notes:
-- The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you’ll need to re-stage and commit again.
-
-## Slices 1–4: install + interactive search UI + preview
-
-```bash
-# build
-go build ./cmd/skulls
-
-# interactive search + install (requires --dir for now)
-./skulls --dir ~/.pi/agent/skills
-
-# direct install
-./skulls add obra/superpowers using-git-worktrees --dir ~/.pi/agent/skills
-
-# overwrite
-./skulls add obra/superpowers using-git-worktrees --dir ~/.pi/agent/skills --force
-```
-
-Notes:
-- For now, Skulls expects skills to live at `skills/<skill-id>/SKILL.md` in the repo.
-- In search mode, Skulls shows popular skills by default (empty query).
-- The right pane shows a highlighted Markdown preview of `SKILL.md` (best-effort; GitHub-only; may use the GitHub API as a fallback).
-- It then shows a small install progress UI and exits with a final “Installed …” message.
+- The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you'll need to re-stage and commit again.
