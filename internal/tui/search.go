@@ -357,7 +357,8 @@ func (m searchModel) View() string {
 	q := strings.TrimSpace(m.input.Value())
 	status := ""
 
-	if q == "" {
+	switch {
+	case q == "":
 		switch {
 		case m.popularLoading:
 			status = m.spinner.View() + " Popular…"
@@ -366,14 +367,15 @@ func (m searchModel) View() string {
 		default:
 			status = "Popular • Type to search • Enter to install • Esc to quit"
 		}
-	} else if len([]rune(q)) < 2 {
+	case len([]rune(q)) < 2:
 		status = "Type at least 2 characters to search."
-	} else {
-		if m.searching {
+	default:
+		switch {
+		case m.searching:
 			status = m.spinner.View() + " Searching…"
-		} else if m.searchErr != nil {
+		case m.searchErr != nil:
 			status = "Error: " + m.searchErr.Error()
-		} else {
+		default:
 			status = "Enter to install • Esc to quit"
 		}
 	}

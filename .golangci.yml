@@ -18,11 +18,6 @@ linters:
     - unused
 
   settings:
-    gocritic:
-      disabled-checks:
-        - ifElseChain
-        - singleCaseSwitch
-
     revive:
       severity: warning
       rules:
