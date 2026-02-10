@@ -40,7 +40,7 @@ func (c Client) Popular(ctx context.Context, limit int) ([]Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("popular fetch failed: %s", resp.Status)

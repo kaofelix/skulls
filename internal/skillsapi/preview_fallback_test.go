@@ -17,7 +17,7 @@ func TestClient_FetchSkillMarkdown_FallbackViaGitHubTree(t *testing.T) {
 			return
 		case "/vercel-labs/agent-skills/HEAD/skills/composition-patterns/SKILL.md":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("---\nname: vercel-composition-patterns\ndescription: x\n---\n# Hi\n"))
+			_, _ = w.Write([]byte("---\nname: vercel-composition-patterns\ndescription: x\n---\n# Hi\n"))
 			return
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -39,7 +39,7 @@ func TestClient_FetchSkillMarkdown_FallbackViaGitHubTree(t *testing.T) {
 		// Minimal trees response.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"tree":[
+		_, _ = w.Write([]byte(`{"tree":[
 			{"path":"README.md","type":"blob"},
 			{"path":"skills/composition-patterns/SKILL.md","type":"blob"}
 		]}`))

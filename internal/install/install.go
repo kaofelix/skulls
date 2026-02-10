@@ -62,7 +62,7 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	repoDir := filepath.Join(tmp, "repo")
 

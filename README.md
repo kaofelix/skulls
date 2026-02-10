@@ -50,9 +50,19 @@ Repository layout:
 go build ./cmd/skulls
 ```
 
-### Git hooks (format + test)
+### Git hooks (format + lint + test)
 
 This repo uses [prek](https://prek.j178.dev/) (pre-commit compatible).
+
+Install tools:
+
+```bash
+# option 1
+brew install golangci-lint
+
+# option 2
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
 
 One-time setup per clone:
 
@@ -62,7 +72,7 @@ One-time setup per clone:
 
 What it does:
 - Installs **pre-commit** and **pre-push** git hooks via `prek`.
-- On commit: runs `gofmt` (auto-fix) and `go test ./...`.
+- On commit: runs `gofmt` (auto-fix), `golangci-lint run`, and `go test ./...`.
 - On push: runs `go test ./...`.
 
 Notes:

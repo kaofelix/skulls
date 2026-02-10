@@ -50,7 +50,7 @@ func TestClient_FetchSkillMarkdown_GitHubRawHEAD(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("# Hello\n"))
+		_, _ = w.Write([]byte("# Hello\n"))
 	}))
 	defer srv.Close()
 

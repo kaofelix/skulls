@@ -85,8 +85,7 @@ func (m installModel) Init() tea.Cmd {
 func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		if msg.String() == "ctrl+c" {
 			m.err = tea.ErrProgramKilled
 			return m, tea.Quit
 		}

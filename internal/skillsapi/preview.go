@@ -107,7 +107,7 @@ func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner
 	if err != nil {
 		return "", 0, fmt.Errorf("%w: %v", ErrPreviewUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", resp.StatusCode, fmt.Errorf("%w: %s", ErrPreviewUnavailable, resp.Status)
@@ -139,7 +139,7 @@ func fetchGitHubTreeSkillMdPaths(ctx context.Context, httpClient *http.Client, a
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("tree listing failed: %s", resp.Status)

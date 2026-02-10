@@ -136,17 +136,17 @@ func newSearchModel() searchModel {
 	l.Title = ""
 
 	return searchModel{
-		client:       skillsapi.Client{},
-		input:        ti,
-		results:      l,
-		spinner:      s,
-		previewCache: map[string]string{},
-		previewVP:    viewport.New(0, 0),
+		client:         skillsapi.Client{},
+		popularLoading: true,
+		input:          ti,
+		results:        l,
+		spinner:        s,
+		previewCache:   map[string]string{},
+		previewVP:      viewport.New(0, 0),
 	}
 }
 
 func (m searchModel) Init() tea.Cmd {
-	m.popularLoading = true
 	return tea.Batch(textinput.Blink, m.spinner.Tick, doPopular(m.client, 50))
 }
 
