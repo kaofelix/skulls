@@ -18,16 +18,27 @@ Behavior:
 - The right pane previews the selected skill's `SKILL.md` (best-effort; GitHub sources only).
 - `Enter` installs the selected skill. `Esc` quits.
 
-### Add (direct install)
+### Add (direct install / source selector)
 
 ```bash
-skulls add <source> <skill-id> --dir <target-dir> [--force]
+# direct install
+skulls add <source> <skill-id> --dir <target-dir>
+
+# shorthand direct install
+skulls add owner/repo@skill-id --dir <target-dir>
+
+# interactive selector (when skill-id is omitted)
+skulls add <source> --dir <target-dir>
 ```
 
 `<source>` formats:
 - `owner/repo` (GitHub shorthand)
 - a git remote URL (`https://...`, `git@...`, `file:///...`)
 - a local path to a git repo
+
+Notes:
+- When `<skill-id>` is omitted, skulls discovers `skills/**/SKILL.md` in the source and opens an interactive selector.
+- In add mode, installs overwrite existing target skill folders.
 
 ## Install layout
 

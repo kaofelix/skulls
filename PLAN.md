@@ -78,22 +78,22 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Rendering**
 - Render Markdown → ANSI using Glamour.
 
-## Slice 5 — Non-interactive add mode (vercel-style)
+## Slice 5 — Add mode source selector (in progress)
 
-**Goal**: enable installing from a source repo without the full-screen search UI.
+**Goal**: enable installing from a source repo without requiring a skill id upfront.
 
 **UX**
-- Command installs one or more skills discovered in the repository by parsing `SKILL.md` frontmatter.
-- Examples:
-  - `skulls add <source> --dir <target-dir> --skill <name>`
-  - `skulls add <source> --dir <target-dir> --all`
-  - `skulls add <source> --list`
-  - Optional shorthand: `skulls add owner/repo@skill-name --dir <target-dir>`
+- Direct install still works:
+  - `skulls add <source> <skill-id> --dir <target-dir>`
+- If skill id is omitted, open an interactive selector sourced from the repository:
+  - `skulls add <source> --dir <target-dir>`
+- Selector supports local filtering and previewing `SKILL.md`.
 
 **Behavior**
-- Clone repo (unless local path).
-- Discover skills by scanning for `SKILL.md` (similar to vercel-labs/skills).
-- Install by matching frontmatter `name`.
+- Discover skills by scanning `skills/**/SKILL.md` and parsing frontmatter `name`.
+- For selector mode, use discovered skills as data source and read preview markdown directly from discovered `SKILL.md` files.
+- Install by matching selected/frontmatter name.
+- Add mode overwrites existing target skill directories.
 
 ## Slice 6 — Remember the target directory
 

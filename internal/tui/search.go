@@ -24,9 +24,21 @@ type SearchResult struct {
 	Skill    skillsapi.Skill
 }
 
+type SearchOptions struct {
+	InitialSkills []skillsapi.Skill
+	Placeholder   string
+	StatusHint    string
+	SearchFunc    func(context.Context, string, int) ([]skillsapi.Skill, error)
+	PreviewFunc   func(context.Context, skillsapi.Skill) (string, error)
+}
+
 // RunSearch runs the interactive search UI in the alt screen and returns the selected skill.
 func RunSearch() (SearchResult, error) {
-	m := newSearchModel()
+	return RunSearchWithOptions(SearchOptions{})
+}
+
+func RunSearchWithOptions(opts SearchOptions) (SearchResult, error) {
+	m := newSearchModelWithOptions(opts)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := p.Run()
 	if err != nil {
@@ -80,12 +92,16 @@ type previewResultMsg struct {
 type searchModel struct {
 	client skillsapi.Client
 
-	input     textinput.Model
-	results   list.Model
-	searchSeq int
-	searching bool
-	searchErr error
-	spinner   spinner.Model
+	input       textinput.Model
+	results     list.Model
+	allItems    []list.Item
+	searchSeq   int
+	searching   bool
+	searchErr   error
+	spinner     spinner.Model
+	statusHint  string
+	searchFunc  func(context.Context, string, int) ([]skillsapi.Skill, error)
+	previewFunc func(context.Context, skillsapi.Skill) (string, error)
 
 	popularLoading bool
 	popularErr     error
@@ -118,8 +134,16 @@ const (
 )
 
 func newSearchModel() searchModel {
+	return newSearchModelWithOptions(SearchOptions{})
+}
+
+func newSearchModelWithOptions(opts SearchOptions) searchModel {
 	ti := textinput.New()
-	ti.Placeholder = "Search skills…"
+	placeholder := strings.TrimSpace(opts.Placeholder)
+	if placeholder == "" {
+		placeholder = "Search skills…"
+	}
+	ti.Placeholder = placeholder
 	ti.Focus()
 	ti.Prompt = "> "
 
@@ -135,18 +159,34 @@ func newSearchModel() searchModel {
 	l.SetShowFilter(false)
 	l.Title = ""
 
-	return searchModel{
+	allItems := make([]list.Item, 0, len(opts.InitialSkills))
+	for _, sk := range opts.InitialSkills {
+		allItems = append(allItems, skillItem{s: sk})
+	}
+
+	m := searchModel{
 		client:         skillsapi.Client{},
-		popularLoading: true,
+		popularLoading: len(allItems) == 0,
 		input:          ti,
 		results:        l,
+		allItems:       allItems,
 		spinner:        s,
+		statusHint:     strings.TrimSpace(opts.StatusHint),
+		searchFunc:     opts.SearchFunc,
+		previewFunc:    opts.PreviewFunc,
 		previewCache:   map[string]string{},
 		previewVP:      viewport.New(0, 0),
 	}
+	if len(allItems) > 0 {
+		m.results.SetItems(allItems)
+	}
+	return m
 }
 
 func (m searchModel) Init() tea.Cmd {
+	if len(m.allItems) > 0 {
+		return tea.Batch(textinput.Blink, m.spinner.Tick, m.ensurePreviewForSelection())
+	}
 	return tea.Batch(textinput.Blink, m.spinner.Tick, doPopular(m.client, 50))
 }
 
@@ -262,11 +302,33 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.input.Value() != oldQuery {
-			// If query changed, debounce a search.
-			m.searchSeq++
 			q := strings.TrimSpace(m.input.Value())
 			m.searchErr = nil
 
+			if len(m.allItems) > 0 {
+				m.searching = false
+				if q == "" {
+					m.results.SetItems(m.allItems)
+				} else {
+					filtered := make([]list.Item, 0, len(m.allItems))
+					needle := strings.ToLower(q)
+					for _, it := range m.allItems {
+						si, ok := it.(skillItem)
+						if !ok {
+							continue
+						}
+						if strings.Contains(strings.ToLower(si.s.SkillID), needle) {
+							filtered = append(filtered, it)
+						}
+					}
+					m.results.SetItems(filtered)
+				}
+				previewCmd = m.ensurePreviewForSelection()
+				return m, tea.Batch(inputCmd, listCmd, previewCmd)
+			}
+
+			// If query changed, debounce a search.
+			m.searchSeq++
 			if q == "" {
 				m.searching = false
 				// Show popular-by-default.
@@ -300,7 +362,7 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.searching = true
-		return m, doSearch(m.client, msg.query, 10, msg.seq)
+		return m, doSearch(m.client, m.searchFunc, msg.query, 10, msg.seq)
 
 	case searchResultMsg:
 		if msg.seq != m.searchSeq {
@@ -357,26 +419,33 @@ func (m searchModel) View() string {
 	q := strings.TrimSpace(m.input.Value())
 	var status string
 
-	switch {
-	case q == "":
-		switch {
-		case m.popularLoading:
-			status = m.spinner.View() + " Popular…"
-		case m.popularErr != nil:
-			status = "Error loading popular: " + m.popularErr.Error()
-		default:
-			status = "Popular • Type to search • Enter to install • Esc to quit"
+	if len(m.allItems) > 0 {
+		status = m.statusHint
+		if status == "" {
+			status = "Filter skills • Enter to install • Esc to quit"
 		}
-	case len([]rune(q)) < 2:
-		status = "Type at least 2 characters to search."
-	default:
+	} else {
 		switch {
-		case m.searching:
-			status = m.spinner.View() + " Searching…"
-		case m.searchErr != nil:
-			status = "Error: " + m.searchErr.Error()
+		case q == "":
+			switch {
+			case m.popularLoading:
+				status = m.spinner.View() + " Popular…"
+			case m.popularErr != nil:
+				status = "Error loading popular: " + m.popularErr.Error()
+			default:
+				status = "Popular • Type to search • Enter to install • Esc to quit"
+			}
+		case len([]rune(q)) < 2:
+			status = "Type at least 2 characters to search."
 		default:
-			status = "Enter to install • Esc to quit"
+			switch {
+			case m.searching:
+				status = m.spinner.View() + " Searching…"
+			case m.searchErr != nil:
+				status = "Error: " + m.searchErr.Error()
+			default:
+				status = "Enter to install • Esc to quit"
+			}
 		}
 	}
 
@@ -582,7 +651,7 @@ func (m *searchModel) ensurePreviewForSelection() tea.Cmd {
 	m.previewRendered = ""
 	m.previewVP.GotoTop()
 	m.previewVP.SetContent("")
-	return doPreview(m.client, s, key, seq)
+	return doPreview(m.client, m.previewFunc, s, key, seq)
 }
 
 func renderMarkdownANSI(md string, wrap int) (string, error) {
@@ -611,12 +680,16 @@ func renderMarkdownANSI(md string, wrap int) (string, error) {
 	return rendered, nil
 }
 
-func doSearch(client skillsapi.Client, query string, limit int, seq int) tea.Cmd {
+func doSearch(client skillsapi.Client, searchFn func(context.Context, string, int) ([]skillsapi.Skill, error), query string, limit int, seq int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
-		skills, err := client.Search(ctx, query, limit)
+		fn := searchFn
+		if fn == nil {
+			fn = client.Search
+		}
+		skills, err := fn(ctx, query, limit)
 		return searchResultMsg{seq: seq, skills: skills, err: err}
 	}
 }
@@ -631,12 +704,16 @@ func doPopular(client skillsapi.Client, limit int) tea.Cmd {
 	}
 }
 
-func doPreview(client skillsapi.Client, skill skillsapi.Skill, key string, seq int) tea.Cmd {
+func doPreview(client skillsapi.Client, previewFn func(context.Context, skillsapi.Skill) (string, error), skill skillsapi.Skill, key string, seq int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
-		md, err := client.FetchSkillMarkdown(ctx, skill)
+		fn := previewFn
+		if fn == nil {
+			fn = client.FetchSkillMarkdown
+		}
+		md, err := fn(ctx, skill)
 		return previewResultMsg{seq: seq, key: key, md: md, err: err}
 	}
 }

@@ -6,14 +6,25 @@ import (
 	"strings"
 
 	"github.com/kaofelix/skulls/internal/install"
+	"github.com/kaofelix/skulls/internal/skillsapi"
 	"github.com/kaofelix/skulls/internal/tui"
 )
+
+type tuiSearchResult = tui.SearchResult
+type tuiInstallResult = tui.InstallResult
+type tuiSkill = skillsapi.Skill
+
+var runAddInstallUI = tui.RunInstall
+var runAddInstallPlain = func(source string, skillID string, targetDir string, force bool) (string, error) {
+	return install.InstallSkill(source, skillID, install.Options{TargetDir: targetDir, Force: force})
+}
+var runAddSelectFromSource = tui.RunSearchFromSource
 
 const helpText = `skulls — dead simple skills
 
 Usage:
   skulls --dir <target-dir> [--force]          # interactive search
-  skulls add <source> <skill-id> --dir <target-dir> [--force]
+  skulls add <source> [skill-id] --dir <target-dir>
 
 Source:
   - GitHub shorthand: owner/repo
@@ -22,6 +33,7 @@ Source:
 
 Examples:
   skulls add obra/superpowers using-git-worktrees --dir ~/.pi/agent/skills
+  skulls add obra/superpowers@test-driven-development --dir ~/.pi/agent/skills
 `
 
 func Run(args []string) int {
@@ -102,40 +114,86 @@ func runAdd(args []string) int {
 	parsed, err := parseAddArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> <skill-id> --dir <target-dir> [--force]\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
 		return 2
 	}
 	if parsed.Help {
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> <skill-id> --dir <target-dir> [--force]\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
 		return 0
 	}
-	if len(parsed.Position) != 2 {
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> <skill-id> --dir <target-dir> [--force]\n")
+	if len(parsed.Position) < 1 || len(parsed.Position) > 2 {
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
 		return 2
 	}
 
 	source := strings.TrimSpace(parsed.Position[0])
-	skillID := strings.TrimSpace(parsed.Position[1])
-	if source == "" || skillID == "" {
-		fmt.Fprint(os.Stderr, "source and skill-id must be non-empty\n")
+	if source == "" {
+		fmt.Fprint(os.Stderr, "source must be non-empty\n")
 		return 2
 	}
+
 	if strings.TrimSpace(parsed.TargetDir) == "" {
 		fmt.Fprint(os.Stderr, "--dir is required for now\n")
 		return 2
 	}
 
-	installedPath, err := install.InstallSkill(source, skillID, install.Options{
-		TargetDir: parsed.TargetDir,
-		Force:     parsed.Force,
-	})
+	var skillID string
+	if len(parsed.Position) == 2 {
+		skillID = strings.TrimSpace(parsed.Position[1])
+		if skillID == "" {
+			fmt.Fprint(os.Stderr, "skill-id must be non-empty\n")
+			return 2
+		}
+	} else {
+		if shorthandSource, shorthandSkill, ok := splitSourceSkillShorthand(source); ok {
+			source = shorthandSource
+			skillID = shorthandSkill
+		} else {
+			selection, err := runAddSelectFromSource(source)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return 1
+			}
+			if !selection.Selected {
+				return 0
+			}
+			skillID = strings.TrimSpace(selection.Skill.SkillID)
+			if skillID == "" {
+				fmt.Fprint(os.Stderr, "Error: selected skill is empty\n")
+				return 1
+			}
+		}
+	}
+
+	installRes, err := runAddInstallUI(parsed.TargetDir, true, skillsapi.Skill{Source: source, SkillID: skillID})
 	if err != nil {
+		if isNoTTYError(err) {
+			installedPath, plainErr := runAddInstallPlain(source, skillID, parsed.TargetDir, true)
+			if plainErr != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", plainErr)
+				return 1
+			}
+			fmt.Printf("Installed %s to %s\n", skillID, installedPath)
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
+	if installRes.Err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", installRes.Err)
+		return 1
+	}
 
-	fmt.Printf("Installed %s to %s\n", skillID, installedPath)
+	fmt.Printf("Installed %s to %s\n", skillID, installRes.InstalledPath)
 	return 0
+}
+
+func isNoTTYError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "open /dev/tty") || strings.Contains(msg, "could not open a new tty")
 }
 
 type searchArgs struct {
@@ -176,6 +234,27 @@ func parseSearchArgs(args []string) (searchArgs, error) {
 	}
 
 	return out, nil
+}
+
+func splitSourceSkillShorthand(source string) (string, string, bool) {
+	s := strings.TrimSpace(source)
+	if strings.Count(s, "@") != 1 {
+		return "", "", false
+	}
+	parts := strings.SplitN(s, "@", 2)
+	repo := strings.TrimSpace(parts[0])
+	skill := strings.TrimSpace(parts[1])
+	if repo == "" || skill == "" {
+		return "", "", false
+	}
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "git@") || strings.HasPrefix(repo, "/") || strings.HasPrefix(repo, "./") || strings.HasPrefix(repo, "../") {
+		return "", "", false
+	}
+	repoParts := strings.Split(repo, "/")
+	if len(repoParts) != 2 || strings.TrimSpace(repoParts[0]) == "" || strings.TrimSpace(repoParts[1]) == "" {
+		return "", "", false
+	}
+	return repo, skill, true
 }
 
 func runSearch(args []string) int {

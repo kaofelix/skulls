@@ -132,21 +132,22 @@ func (m installModel) View() string {
 	}
 	b.WriteString("\n\n")
 
+	const lineWidth = 52
 	for _, step := range m.order {
 		e, seen := m.steps[step]
 		label := stepLabel(step)
 
 		if !seen {
-			b.WriteString(muted.Render("• "+label) + "\n")
+			b.WriteString(muted.Render(formatStepLine(label, "·", lineWidth)) + "\n")
 			continue
 		}
 
 		if e.Done {
-			b.WriteString(ok.Render("✓ "+label) + "\n")
+			b.WriteString(ok.Render(formatStepLine(label, "✓", lineWidth)) + "\n")
 			continue
 		}
-		// Current step
-		b.WriteString(pending.Render(m.spin.View()+" "+label) + "\n")
+		// Current step.
+		b.WriteString(pending.Render(formatStepLine(label, m.spin.View(), lineWidth)) + "\n")
 	}
 
 	if m.err != nil {
@@ -154,6 +155,27 @@ func (m installModel) View() string {
 	}
 
 	return b.String()
+}
+
+func formatStepLine(label string, status string, width int) string {
+	label = strings.TrimSpace(label)
+	status = strings.TrimSpace(status)
+	if label == "" {
+		label = "Step"
+	}
+	if status == "" {
+		status = "·"
+	}
+	if width < 20 {
+		width = 20
+	}
+
+	minDots := 3
+	dots := width - lipgloss.Width(label) - lipgloss.Width(status) - 2
+	if dots < minDots {
+		dots = minDots
+	}
+	return label + " " + strings.Repeat(".", dots) + " " + status
 }
 
 func startInstall(targetDir string, force bool, skill skillsapi.Skill) <-chan tea.Msg {
