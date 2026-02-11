@@ -34,7 +34,7 @@ func resolveSkillDir(repoDir string, skillID string) (string, error) {
 	var matches []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return walkErr
 		}
 		if d.IsDir() {
 			return nil
@@ -42,7 +42,7 @@ func resolveSkillDir(repoDir string, skillID string) (string, error) {
 		if strings.EqualFold(d.Name(), "SKILL.md") {
 			b, err := os.ReadFile(p)
 			if err != nil {
-				return nil
+				return err
 			}
 			name, ok := parseSkillNameFromFrontmatter(string(b))
 			if ok && name == skillID {

@@ -8,6 +8,7 @@ linters:
   enable:
     - bodyclose
     - errcheck
+    - nilerr
     - errorlint
     - gocritic
     - govet
