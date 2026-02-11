@@ -355,7 +355,7 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m searchModel) View() string {
 	q := strings.TrimSpace(m.input.Value())
-	status := ""
+	var status string
 
 	switch {
 	case q == "":
