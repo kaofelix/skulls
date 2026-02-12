@@ -78,7 +78,7 @@ skulls add <source> <skill-id> --dir <target-dir> [--force]
 **Rendering**
 - Render Markdown → ANSI using Glamour.
 
-## Slice 5 — Add mode source selector (in progress)
+## Slice 5 — Add mode source selector (done)
 
 **Goal**: enable installing from a source repo without requiring a skill id upfront.
 

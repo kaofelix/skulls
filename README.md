@@ -9,10 +9,12 @@ Dead simple skills 💀
 ### Interactive search
 
 ```bash
-skulls --dir <target-dir> [--force]
+skulls [--dir <target-dir>] [--force]
 ```
 
 Behavior:
+- If `--dir` is omitted, skulls uses the saved install directory from config.
+- On first run without a saved directory, skulls prompts for one and persists it.
 - Empty query shows popular skills.
 - Queries with length >= 2 search via `https://skills.sh/api/search`.
 - The right pane previews the selected skill's `SKILL.md` (best-effort; GitHub sources only).
@@ -22,13 +24,13 @@ Behavior:
 
 ```bash
 # direct install
-skulls add <source> <skill-id> --dir <target-dir>
+skulls add <source> <skill-id> [--dir <target-dir>]
 
 # shorthand direct install
-skulls add owner/repo@skill-id --dir <target-dir>
+skulls add owner/repo@skill-id [--dir <target-dir>]
 
 # interactive selector (when skill-id is omitted)
-skulls add <source> --dir <target-dir>
+skulls add <source> [--dir <target-dir>]
 ```
 
 `<source>` formats:
@@ -39,6 +41,14 @@ skulls add <source> --dir <target-dir>
 Notes:
 - When `<skill-id>` is omitted, skulls discovers `skills/**/SKILL.md` in the source and opens an interactive selector.
 - In add mode, installs overwrite existing target skill folders.
+- `--dir` always overrides the saved config value.
+
+### Config
+
+```bash
+skulls config set dir <path>
+skulls config get
+```
 
 ## Install layout
 

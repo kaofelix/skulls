@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,15 @@ func captureStdoutStderr(t *testing.T) (*bytes.Buffer, *bytes.Buffer, func()) {
 		os.Stdout = oldOut
 		os.Stderr = oldErr
 	}
+}
+
+func useTestConfigPath(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	p := filepath.Join(tmp, "config.json")
+	orig := configPathFunc
+	configPathFunc = func() (string, error) { return p, nil }
+	t.Cleanup(func() { configPathFunc = orig })
 }
 
 func TestRunAdd_WhenSkillIDOmitted_UsesSelectorAndInstallUIWithOverwrite(t *testing.T) {
@@ -124,25 +134,39 @@ func TestRunAdd_WhenSelectorCancelled_DoesNotInstall(t *testing.T) {
 	}
 }
 
-func TestRunAdd_WhenDirMissing_DoesNotOpenSelector(t *testing.T) {
-	origSelect := runAddSelectFromSource
-	t.Cleanup(func() { runAddSelectFromSource = origSelect })
+func TestRunAdd_WhenDirMissing_UsesConfiguredDir(t *testing.T) {
+	useTestConfigPath(t)
 
-	calledSelect := false
-	runAddSelectFromSource = func(source string) (tuiSearchResult, error) {
-		calledSelect = true
-		return tuiSearchResult{}, nil
+	if err := setInstallDir("/tmp/saved-skills"); err != nil {
+		t.Fatal(err)
 	}
 
-	_, _, restore := captureStdoutStderr(t)
+	origSelect := runAddSelectFromSource
+	origInstallUI := runAddInstallUI
+	t.Cleanup(func() {
+		runAddSelectFromSource = origSelect
+		runAddInstallUI = origInstallUI
+	})
+
+	runAddSelectFromSource = func(source string) (tuiSearchResult, error) {
+		return tuiSearchResult{Selected: true, Skill: tuiSkill{Source: source, SkillID: "chosen-skill"}}, nil
+	}
+
+	gotTarget := ""
+	runAddInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		gotTarget = targetDir
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	_, errBuf, restore := captureStdoutStderr(t)
 	exit := Run([]string{"add", "owner/repo"})
 	restore()
 
-	if exit != 2 {
-		t.Fatalf("expected usage exit 2, got %d", exit)
+	if exit != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%s", exit, errBuf.String())
 	}
-	if calledSelect {
-		t.Fatalf("selector should not run when --dir is missing")
+	if gotTarget != "/tmp/saved-skills" {
+		t.Fatalf("target=%q", gotTarget)
 	}
 }
 
@@ -289,5 +313,121 @@ func TestRunAdd_WhenSkillIDProvided_StillInstallsDirectly(t *testing.T) {
 	}
 	if gotSkill.SkillID != "my-skill" {
 		t.Fatalf("got skill=%q", gotSkill.SkillID)
+	}
+}
+
+func TestRun_ConfigSetAndGetDir(t *testing.T) {
+	useTestConfigPath(t)
+
+	_, errBufSet, restoreSet := captureStdoutStderr(t)
+	exitSet := Run([]string{"config", "set", "dir", "/tmp/skills"})
+	restoreSet()
+	if exitSet != 0 {
+		t.Fatalf("set exit=%d stderr=%s", exitSet, errBufSet.String())
+	}
+
+	outBufGet, errBufGet, restoreGet := captureStdoutStderr(t)
+	exitGet := Run([]string{"config", "get"})
+	restoreGet()
+	if exitGet != 0 {
+		t.Fatalf("get exit=%d stderr=%s", exitGet, errBufGet.String())
+	}
+	if !strings.Contains(outBufGet.String(), "/tmp/skills") {
+		t.Fatalf("expected configured dir in output, got: %q", outBufGet.String())
+	}
+}
+
+func TestRun_NoArgs_WhenDirNotConfigured_PromptsAndPersists(t *testing.T) {
+	useTestConfigPath(t)
+
+	origPrompt := promptForInstallDir
+	origSearch := runSearchUI
+	t.Cleanup(func() {
+		promptForInstallDir = origPrompt
+		runSearchUI = origSearch
+	})
+
+	promptForInstallDir = func() (string, error) {
+		return "/tmp/prompted-skills", nil
+	}
+	runSearchUI = func() (tuiSearchResult, error) {
+		return tuiSearchResult{Selected: false}, nil
+	}
+
+	_, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+
+	dir, ok, err := getInstallDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || dir != "/tmp/prompted-skills" {
+		t.Fatalf("got dir=%q ok=%v", dir, ok)
+	}
+}
+
+func TestRunAdd_DirFlagOverridesConfiguredDir(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := setInstallDir("/tmp/saved-skills"); err != nil {
+		t.Fatal(err)
+	}
+
+	origInstallUI := runAddInstallUI
+	t.Cleanup(func() { runAddInstallUI = origInstallUI })
+
+	gotTarget := ""
+	runAddInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		gotTarget = targetDir
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	_, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"add", "owner/repo", "my-skill", "--dir", "/tmp/flag-skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	if gotTarget != "/tmp/flag-skills" {
+		t.Fatalf("target=%q", gotTarget)
+	}
+}
+
+func TestRunSearch_DirFlagOverridesConfiguredDir(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := setInstallDir("/tmp/saved-skills"); err != nil {
+		t.Fatal(err)
+	}
+
+	origSearch := runSearchUI
+	origInstall := runSearchInstallUI
+	t.Cleanup(func() {
+		runSearchUI = origSearch
+		runSearchInstallUI = origInstall
+	})
+
+	runSearchUI = func() (tuiSearchResult, error) {
+		return tuiSearchResult{Selected: true, Skill: tuiSkill{Source: "owner/repo", SkillID: "chosen-skill"}}, nil
+	}
+
+	gotTarget := ""
+	runSearchInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		gotTarget = targetDir
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	_, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"--dir", "/tmp/flag-skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	if gotTarget != "/tmp/flag-skills" {
+		t.Fatalf("target=%q", gotTarget)
 	}
 }

@@ -19,12 +19,16 @@ var runAddInstallPlain = func(source string, skillID string, targetDir string, f
 	return install.InstallSkill(source, skillID, install.Options{TargetDir: targetDir, Force: force})
 }
 var runAddSelectFromSource = tui.RunSearchFromSource
+var runSearchUI = tui.RunSearch
+var runSearchInstallUI = tui.RunInstall
 
 const helpText = `skulls — dead simple skills
 
 Usage:
-  skulls --dir <target-dir> [--force]          # interactive search
-  skulls add <source> [skill-id] --dir <target-dir>
+  skulls [--dir <target-dir>] [--force]          # interactive search
+  skulls add <source> [skill-id] [--dir <target-dir>]
+  skulls config set dir <path>
+  skulls config get
 
 Source:
   - GitHub shorthand: owner/repo
@@ -38,9 +42,7 @@ Examples:
 
 func Run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "--dir is required for search mode for now. Try: skulls --dir <target-dir>\n\n")
-		fmt.Fprint(os.Stderr, helpText)
-		return 2
+		return runSearch(args)
 	}
 
 	switch args[0] {
@@ -49,6 +51,8 @@ func Run(args []string) int {
 		return 0
 	case "add":
 		return runAdd(args[1:])
+	case "config":
+		return runConfig(args[1:])
 	default:
 		if strings.HasPrefix(args[0], "-") {
 			return runSearch(args)
@@ -114,15 +118,15 @@ func runAdd(args []string) int {
 	parsed, err := parseAddArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] [--dir <target-dir>]\n")
 		return 2
 	}
 	if parsed.Help {
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] [--dir <target-dir>]\n")
 		return 0
 	}
 	if len(parsed.Position) < 1 || len(parsed.Position) > 2 {
-		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] --dir <target-dir>\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls add <source> [skill-id] [--dir <target-dir>]\n")
 		return 2
 	}
 
@@ -132,8 +136,9 @@ func runAdd(args []string) int {
 		return 2
 	}
 
-	if strings.TrimSpace(parsed.TargetDir) == "" {
-		fmt.Fprint(os.Stderr, "--dir is required for now\n")
+	targetDir, err := resolveInstallDir(parsed.TargetDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
 
@@ -165,10 +170,10 @@ func runAdd(args []string) int {
 		}
 	}
 
-	installRes, err := runAddInstallUI(parsed.TargetDir, true, skillsapi.Skill{Source: source, SkillID: skillID})
+	installRes, err := runAddInstallUI(targetDir, true, skillsapi.Skill{Source: source, SkillID: skillID})
 	if err != nil {
 		if isNoTTYError(err) {
-			installedPath, plainErr := runAddInstallPlain(source, skillID, parsed.TargetDir, true)
+			installedPath, plainErr := runAddInstallPlain(source, skillID, targetDir, true)
 			if plainErr != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", plainErr)
 				return 1
@@ -261,19 +266,20 @@ func runSearch(args []string) int {
 	parsed, err := parseSearchArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
-		fmt.Fprint(os.Stderr, "Usage: skulls --dir <target-dir> [--force]\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls [--dir <target-dir>] [--force]\n")
 		return 2
 	}
 	if parsed.Help {
-		fmt.Fprint(os.Stderr, "Usage: skulls --dir <target-dir> [--force]\n")
+		fmt.Fprint(os.Stderr, "Usage: skulls [--dir <target-dir>] [--force]\n")
 		return 0
 	}
-	if strings.TrimSpace(parsed.TargetDir) == "" {
-		fmt.Fprint(os.Stderr, "--dir is required for now\n")
+	targetDir, err := resolveInstallDir(parsed.TargetDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
 
-	searchRes, err := tui.RunSearch()
+	searchRes, err := runSearchUI()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -282,7 +288,7 @@ func runSearch(args []string) int {
 		return 0
 	}
 
-	installRes, err := tui.RunInstall(parsed.TargetDir, parsed.Force, searchRes.Skill)
+	installRes, err := runSearchInstallUI(targetDir, parsed.Force, searchRes.Skill)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
