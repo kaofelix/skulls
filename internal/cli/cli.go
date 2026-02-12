@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kaofelix/skulls/internal/install"
@@ -178,7 +179,7 @@ func runAdd(args []string) int {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", plainErr)
 				return 1
 			}
-			fmt.Printf("Installed %s to %s\n", skillID, installedPath)
+			printInstallSuccess(skillID, source, installedPath)
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -189,7 +190,7 @@ func runAdd(args []string) int {
 		return 1
 	}
 
-	fmt.Printf("Installed %s to %s\n", skillID, installRes.InstalledPath)
+	printInstallSuccess(skillID, source, installRes.InstalledPath)
 	return 0
 }
 
@@ -298,6 +299,45 @@ func runSearch(args []string) int {
 		return 1
 	}
 
-	fmt.Printf("\n💀 Installed %s to %s\n", searchRes.Skill.SkillID, installRes.InstalledPath)
+	printInstallSuccess(searchRes.Skill.SkillID, searchRes.Skill.Source, installRes.InstalledPath)
 	return 0
+}
+
+func printInstallSuccess(skillID string, source string, installedPath string) {
+	fmt.Printf("\n💀 Installed %s\n", strings.TrimSpace(skillID))
+	if strings.TrimSpace(source) != "" {
+		fmt.Printf("   Source: %s\n", strings.TrimSpace(source))
+	}
+	fmt.Printf("   Path: %s\n", compactPath(installedPath))
+}
+
+func compactPath(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return p
+	}
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
+		return p
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return abs
+	}
+	home = filepath.Clean(home)
+	if abs == home {
+		return "~"
+	}
+	prefix := home + string(filepath.Separator)
+	if strings.HasPrefix(abs, prefix) {
+		rel := strings.TrimPrefix(abs, prefix)
+		if rel == "" {
+			return "~"
+		}
+		return "~" + string(filepath.Separator) + rel
+	}
+	return abs
 }

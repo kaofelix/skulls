@@ -10,23 +10,45 @@ import (
 	"github.com/kaofelix/skulls/internal/skillsapi"
 )
 
-func TestFormatStepLine_IncludesDotLeaderAndStatus(t *testing.T) {
-	line := formatStepLine("Download repository", "✓", 40)
-	if line == "" {
-		t.Fatalf("line should not be empty")
+func TestInstallView_ShowsBannerAndContext(t *testing.T) {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+
+	m := installModel{
+		targetDir: "~/agent/skills",
+		skill:     skillsapi.Skill{SkillID: "demo-skill", Source: "owner/repo"},
+		spin:      s,
+		steps: map[install.Step]install.Event{
+			install.StepNormalize: {Step: install.StepNormalize, Message: "Source normalized", Done: true},
+		},
+		order: []install.Step{install.StepNormalize},
 	}
-	if !strings.Contains(line, "Download repository") {
-		t.Fatalf("missing label: %q", line)
+
+	view := m.View()
+	if !strings.Contains(view, "░░███") {
+		t.Fatalf("expected skulls lettering banner in view: %q", view)
 	}
-	if !strings.Contains(line, "✓") {
-		t.Fatalf("missing status: %q", line)
+	if !strings.Contains(view, "Source:") {
+		t.Fatalf("expected Source context line in view: %q", view)
 	}
-	if !strings.Contains(line, ".") {
-		t.Fatalf("expected dot leader: %q", line)
+	if !strings.Contains(view, "Skill:") {
+		t.Fatalf("expected Skill context line in view: %q", view)
+	}
+	if !strings.Contains(view, "Install dir:") {
+		t.Fatalf("expected install dir context line in view: %q", view)
 	}
 }
 
-func TestInstallView_UsesDotLeadersForSteps(t *testing.T) {
+func TestNewInstallModel_HidesNormalizeStepFromTimeline(t *testing.T) {
+	m := newInstallModel("/tmp/skills", false, skillsapi.Skill{SkillID: "demo", Source: "owner/repo"})
+	for _, step := range m.order {
+		if step == install.StepNormalize {
+			t.Fatalf("normalize step should not be shown in timeline order: %+v", m.order)
+		}
+	}
+}
+
+func TestInstallView_UsesConnectedStepTimeline(t *testing.T) {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -34,20 +56,22 @@ func TestInstallView_UsesDotLeadersForSteps(t *testing.T) {
 		skill: skillsapi.Skill{SkillID: "demo"},
 		spin:  s,
 		steps: map[install.Step]install.Event{
-			install.StepNormalize: {Step: install.StepNormalize, Done: true},
-			install.StepClone:     {Step: install.StepClone, Done: false},
+			install.StepClone: {Step: install.StepClone, Message: "Cloned: https://github.com/obra/superpowers.git", Done: true},
 		},
-		order: []install.Step{install.StepNormalize, install.StepClone, install.StepVerify},
+		order: []install.Step{install.StepClone, install.StepVerify},
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "Normalize source") {
-		t.Fatalf("missing normalize step: %q", view)
+	if !strings.Contains(view, "│") {
+		t.Fatalf("expected connected timeline bars in view: %q", view)
 	}
-	if !strings.Contains(view, "Download repository") {
-		t.Fatalf("missing clone step: %q", view)
+	if strings.Contains(view, "...") {
+		t.Fatalf("expected connected timeline style, got dot leader style: %q", view)
 	}
-	if !strings.Contains(view, ".") {
-		t.Fatalf("expected dot leaders in view: %q", view)
+	if !strings.Contains(view, "Cloned: https://github.com/obra/superpowers.git") {
+		t.Fatalf("expected merged cloned message in timeline: %q", view)
+	}
+	if strings.Contains(view, "Repository cloned") {
+		t.Fatalf("expected separate repository-cloned line to be gone: %q", view)
 	}
 }

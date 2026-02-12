@@ -100,7 +100,13 @@ func TestRunAdd_WhenSkillIDOmitted_UsesSelectorAndInstallUIWithOverwrite(t *test
 	if gotSkill.Source != "owner/repo" || gotSkill.SkillID != "chosen-skill" {
 		t.Fatalf("skill=%+v", gotSkill)
 	}
-	if !strings.Contains(outBuf.String(), "Installed chosen-skill to /tmp/installed") {
+	if !strings.Contains(outBuf.String(), "Installed chosen-skill") {
+		t.Fatalf("unexpected stdout: %q", outBuf.String())
+	}
+	if !strings.Contains(outBuf.String(), "Source: owner/repo") {
+		t.Fatalf("unexpected stdout: %q", outBuf.String())
+	}
+	if !strings.Contains(outBuf.String(), "Path: /tmp/installed") {
 		t.Fatalf("unexpected stdout: %q", outBuf.String())
 	}
 }
@@ -429,5 +435,41 @@ func TestRunSearch_DirFlagOverridesConfiguredDir(t *testing.T) {
 	}
 	if gotTarget != "/tmp/flag-skills" {
 		t.Fatalf("target=%q", gotTarget)
+	}
+}
+
+func TestRunSearch_FinalSuccessLine_ShowsSourceAndHomeShortenedPath(t *testing.T) {
+	origSearch := runSearchUI
+	origInstall := runSearchInstallUI
+	t.Cleanup(func() {
+		runSearchUI = origSearch
+		runSearchInstallUI = origInstall
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	runSearchUI = func() (tuiSearchResult, error) {
+		return tuiSearchResult{Selected: true, Skill: tuiSkill{Source: "owner/repo", SkillID: "chosen-skill"}}, nil
+	}
+	runSearchInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		return tuiInstallResult{InstalledPath: filepath.Join(home, ".pi/agent/skills/chosen-skill")}, nil
+	}
+
+	outBuf, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"--dir", "/tmp/skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	out := outBuf.String()
+	if !strings.Contains(out, "Installed chosen-skill") {
+		t.Fatalf("missing install title line: %q", out)
+	}
+	if !strings.Contains(out, "Source: owner/repo") {
+		t.Fatalf("missing source in success output: %q", out)
+	}
+	if !strings.Contains(out, "Path: ~/.pi/agent/skills/chosen-skill") {
+		t.Fatalf("missing home-shortened path in success output: %q", out)
 	}
 }

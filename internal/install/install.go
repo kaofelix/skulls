@@ -67,14 +67,14 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 	repoDir := filepath.Join(tmp, "repo")
 
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepNormalize, Message: "Normalizing source…"})
+		opts.Progress(Event{Step: StepNormalize, Message: "Normalizing source"})
 	}
 	cloneURL, err := gitutil.NormalizeSourceToGitURL(source)
 	if err != nil {
 		return "", err
 	}
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepNormalize, Message: "Normalizing source…", Done: true})
+		opts.Progress(Event{Step: StepNormalize, Message: "Source normalized", Done: true})
 	}
 
 	stdout := opts.GitStdout
@@ -87,17 +87,17 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 	}
 
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepClone, Message: "Downloading repository…"})
+		opts.Progress(Event{Step: StepClone, Message: "Cloning repository"})
 	}
 	if err := gitutil.CloneShallowTo(cloneURL, repoDir, stdout, stderr); err != nil {
 		return "", err
 	}
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepClone, Message: "Downloading repository…", Done: true})
+		opts.Progress(Event{Step: StepClone, Message: "Cloned: " + cloneURL, Done: true})
 	}
 
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepVerify, Message: "Verifying skill layout…"})
+		opts.Progress(Event{Step: StepVerify, Message: "Resolving skill layout"})
 	}
 
 	skillDir, err := resolveSkillDir(repoDir, skillID)
@@ -106,7 +106,11 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 	}
 
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepVerify, Message: "Verifying skill layout…", Done: true})
+		relSkillDir, relErr := filepath.Rel(repoDir, skillDir)
+		if relErr != nil {
+			relSkillDir = skillDir
+		}
+		opts.Progress(Event{Step: StepVerify, Message: "Skill path: " + relSkillDir, Done: true})
 	}
 
 	folderName := sanitizeName(skillID)
@@ -117,24 +121,24 @@ func InstallSkill(source string, skillID string, opts Options) (string, error) {
 			return "", fmt.Errorf("target already exists: %s (use --force to overwrite)", installPath)
 		}
 		if opts.Progress != nil {
-			opts.Progress(Event{Step: StepRemove, Message: "Removing existing installation…"})
+			opts.Progress(Event{Step: StepRemove, Message: "Removing existing install: " + installPath})
 		}
 		if err := os.RemoveAll(installPath); err != nil {
 			return "", err
 		}
 		if opts.Progress != nil {
-			opts.Progress(Event{Step: StepRemove, Message: "Removing existing installation…", Done: true})
+			opts.Progress(Event{Step: StepRemove, Message: "Removed existing install", Done: true})
 		}
 	}
 
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepCopy, Message: "Installing skill files…"})
+		opts.Progress(Event{Step: StepCopy, Message: "Installing files to " + installPath})
 	}
 	if err := fsutil.CopyDir(skillDir, installPath); err != nil {
 		return "", err
 	}
 	if opts.Progress != nil {
-		opts.Progress(Event{Step: StepCopy, Message: "Installing skill files…", Done: true})
+		opts.Progress(Event{Step: StepCopy, Message: "Installed to " + installPath, Done: true})
 	}
 
 	return installPath, nil

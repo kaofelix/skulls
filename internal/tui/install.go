@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -68,7 +70,6 @@ func newInstallModel(targetDir string, force bool, skill skillsapi.Skill) instal
 		spin:      s,
 		steps:     map[install.Step]install.Event{},
 		order: []install.Step{
-			install.StepNormalize,
 			install.StepClone,
 			install.StepVerify,
 			install.StepCopy,
@@ -119,35 +120,47 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m installModel) View() string {
-	headerStyle := lipgloss.NewStyle().Bold(true)
+	banner := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	pending := lipgloss.NewStyle().Foreground(lipgloss.Color("69"))
 	bad := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 
 	b := strings.Builder{}
-	b.WriteString(headerStyle.Render("Installing " + m.skill.SkillID))
-	if m.skill.Source != "" {
-		b.WriteString(muted.Render("  (" + m.skill.Source + ")"))
-	}
+	b.WriteString(banner.Render(skullsBanner()))
 	b.WriteString("\n\n")
 
-	const lineWidth = 52
-	for _, step := range m.order {
+	b.WriteString("Source:      ")
+	if strings.TrimSpace(m.skill.Source) == "" {
+		b.WriteString(muted.Render("(unknown)"))
+	} else {
+		b.WriteString(m.skill.Source)
+	}
+	b.WriteString("\n")
+	b.WriteString("Skill:       " + strings.TrimSpace(m.skill.SkillID) + "\n")
+	b.WriteString("Install dir: " + compactPath(m.targetDir) + "\n")
+	b.WriteString("\n")
+
+	for i, step := range m.order {
 		e, seen := m.steps[step]
 		label := stepLabel(step)
-
-		if !seen {
-			b.WriteString(muted.Render(formatStepLine(label, "·", lineWidth)) + "\n")
-			continue
+		if seen && strings.TrimSpace(e.Message) != "" {
+			label = strings.TrimSpace(e.Message)
 		}
 
-		if e.Done {
-			b.WriteString(ok.Render(formatStepLine(label, "✓", lineWidth)) + "\n")
-			continue
+		switch {
+		case !seen:
+			b.WriteString(muted.Render("○ "+label) + "\n")
+		case e.Done:
+			b.WriteString(ok.Render("◆ "+label) + "\n")
+		default:
+			b.WriteString(pending.Render(m.spin.View()+" "+label) + "\n")
 		}
-		// Current step.
-		b.WriteString(pending.Render(formatStepLine(label, m.spin.View(), lineWidth)) + "\n")
+
+		if i < len(m.order)-1 {
+			b.WriteString(lineStyle.Render("│") + "\n")
+		}
 	}
 
 	if m.err != nil {
@@ -157,25 +170,48 @@ func (m installModel) View() string {
 	return b.String()
 }
 
-func formatStepLine(label string, status string, width int) string {
-	label = strings.TrimSpace(label)
-	status = strings.TrimSpace(status)
-	if label == "" {
-		label = "Step"
-	}
-	if status == "" {
-		status = "·"
-	}
-	if width < 20 {
-		width = 20
-	}
+func skullsBanner() string {
+	return strings.Trim(`
+         █████                 ████  ████
+        ░░███                 ░░███ ░░███
+  █████  ░███ █████ █████ ████ ░███  ░███   █████
+ ███░░   ░███░░███ ░░███ ░███  ░███  ░███  ███░░
+░░█████  ░██████░   ░███ ░███  ░███  ░███ ░░█████
+ ░░░░███ ░███░░███  ░███ ░███  ░███  ░███  ░░░░███
+ ██████  ████ █████ ░░████████ █████ █████ ██████
+░░░░░░  ░░░░ ░░░░░   ░░░░░░░░ ░░░░░ ░░░░░ ░░░░░░
+`, "\n")
+}
 
-	minDots := 3
-	dots := width - lipgloss.Width(label) - lipgloss.Width(status) - 2
-	if dots < minDots {
-		dots = minDots
+func compactPath(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return p
 	}
-	return label + " " + strings.Repeat(".", dots) + " " + status
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
+		return p
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return abs
+	}
+	home = filepath.Clean(home)
+	if abs == home {
+		return "~"
+	}
+	prefix := home + string(filepath.Separator)
+	if strings.HasPrefix(abs, prefix) {
+		rel := strings.TrimPrefix(abs, prefix)
+		if rel == "" {
+			return "~"
+		}
+		return "~" + string(filepath.Separator) + rel
+	}
+	return abs
 }
 
 func startInstall(targetDir string, force bool, skill skillsapi.Skill) <-chan tea.Msg {
@@ -201,13 +237,13 @@ func stepLabel(step install.Step) string {
 	case install.StepNormalize:
 		return "Normalize source"
 	case install.StepClone:
-		return "Download repository"
+		return "Clone repository"
 	case install.StepVerify:
 		return "Verify skill layout"
 	case install.StepRemove:
 		return "Remove existing installation"
 	case install.StepCopy:
-		return "Copy files"
+		return "Copy skill files"
 	default:
 		return string(step)
 	}
