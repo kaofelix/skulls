@@ -3,13 +3,12 @@ package install
 import (
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/kaofelix/skulls/internal/gitutil"
+	"github.com/kaofelix/skulls/internal/skilllayout"
 )
 
 type DiscoveredSkill struct {
@@ -18,11 +17,15 @@ type DiscoveredSkill struct {
 	SkillFilePath string
 }
 
-// DiscoverSkills discovers skills in a source repository by scanning skills/**/SKILL.md
-// and reading YAML frontmatter `name`.
-//
-// For remote sources it clones to a temp directory and returns a cleanup func that should be called.
-// For local path sources cleanup is a no-op.
+type discoverOptions struct {
+	FullDepth bool
+}
+
+// DiscoverSkills discovers skills in a source repository using the same spirit
+// as vercel-labs/skills:
+//   - root SKILL.md (early return by default)
+//   - priority skill directories
+//   - recursive fallback
 func DiscoverSkills(source string) ([]DiscoveredSkill, func(), error) {
 	cloneURL, err := gitutil.NormalizeSourceToGitURL(source)
 	if err != nil {
@@ -45,52 +48,112 @@ func DiscoverSkills(source string) ([]DiscoveredSkill, func(), error) {
 		cleanup = func() { _ = os.RemoveAll(tmp) }
 	}
 
-	root := filepath.Join(repoDir, "skills")
-	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+	skills, err := discoverSkillsInRepo(repoDir, discoverOptions{})
+	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("skills directory not found in repo")
+		return nil, nil, err
 	}
+	return skills, cleanup, nil
+}
 
+func discoverSkillsInRepo(repoDir string, opts discoverOptions) ([]DiscoveredSkill, error) {
 	out := make([]DiscoveredSkill, 0, 16)
-	seen := map[string]string{}
-	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() || !strings.EqualFold(d.Name(), "SKILL.md") {
-			return nil
-		}
-		b, err := os.ReadFile(p)
+	seen := map[string]struct{}{}
+
+	addSkill := func(skillFilePath string) error {
+		b, err := os.ReadFile(skillFilePath)
 		if err != nil {
 			return err
 		}
-		name, ok := parseSkillNameFromFrontmatter(string(b))
+		fm, ok := parseSkillFrontmatter(string(b))
 		if !ok {
 			return nil
 		}
-		if prev, exists := seen[name]; exists {
-			return fmt.Errorf("duplicate skill name %q in %s and %s", name, prev, p)
+		if _, exists := seen[fm.Name]; exists {
+			return nil
 		}
-		seen[name] = p
+		seen[fm.Name] = struct{}{}
 		out = append(out, DiscoveredSkill{
-			Name:          name,
-			SkillDirPath:  filepath.Dir(p),
-			SkillFilePath: p,
+			Name:          fm.Name,
+			SkillDirPath:  filepath.Dir(skillFilePath),
+			SkillFilePath: skillFilePath,
 		})
 		return nil
-	})
-	if walkErr != nil {
-		cleanup()
-		return nil, nil, walkErr
 	}
+
+	rootSkill := filepath.Join(repoDir, "SKILL.md")
+	if fi, err := os.Stat(rootSkill); err == nil && !fi.IsDir() {
+		if err := addSkill(rootSkill); err != nil {
+			return nil, err
+		}
+		if len(out) > 0 && !opts.FullDepth {
+			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+			return out, nil
+		}
+	}
+
+	for _, relDir := range skilllayout.PrioritySearchDirs {
+		dir := filepath.Join(repoDir, filepath.FromSlash(relDir))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
+			if fi, err := os.Stat(skillFile); err == nil && !fi.IsDir() {
+				if err := addSkill(skillFile); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if len(out) == 0 || opts.FullDepth {
+		if err := walkSkillDirsRecursive(repoDir, 0, addSkill); err != nil {
+			return nil, err
+		}
+	}
+
 	if len(out) == 0 {
-		cleanup()
-		return nil, nil, fmt.Errorf("no skills found")
+		return nil, fmt.Errorf("no skills found")
 	}
 
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})
 
-	return out, cleanup, nil
+	return out, nil
+}
+
+func walkSkillDirsRecursive(dir string, depth int, addSkill func(string) error) error {
+	if depth > skilllayout.MaxRecursiveDepth {
+		return nil
+	}
+
+	skillFile := filepath.Join(dir, "SKILL.md")
+	if fi, err := os.Stat(skillFile); err == nil && !fi.IsDir() {
+		if err := addSkill(skillFile); err != nil {
+			return err
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if skilllayout.ShouldSkipDir(e.Name()) {
+			continue
+		}
+		if err := walkSkillDirsRecursive(filepath.Join(dir, e.Name()), depth+1, addSkill); err != nil {
+			return err
+		}
+	}
+	return nil
 }

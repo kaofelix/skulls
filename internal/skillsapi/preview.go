@@ -10,8 +10,11 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/kaofelix/skulls/internal/skilllayout"
 )
 
 // ErrPreviewUnavailable is returned (possibly wrapped) when a SKILL.md preview
@@ -19,6 +22,8 @@ import (
 var ErrPreviewUnavailable = errors.New("preview unavailable")
 
 var shorthandRepoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+const maxPreviewCandidates = 250
 
 type githubTreeResponse struct {
 	Truncated bool `json:"truncated"`
@@ -32,14 +37,15 @@ type githubTreeResponse struct {
 //
 // GitHub-only. Strategy:
 //  1. Fast path: try /skills/<skillID>/SKILL.md
-//  2. Fallback: if 404, list repo tree via GitHub API, fetch candidate SKILL.md files,
-//     parse frontmatter name, and return the one matching skillID.
+//  2. Fallback: on 404, list repo tree via GitHub API, rank SKILL.md candidates,
+//     fetch candidates, parse strict frontmatter, and return matching name.
 func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, error) {
 	owner, repo, ok := parseGitHubRepo(skill.Source)
 	if !ok {
 		return "", ErrPreviewUnavailable
 	}
-	if strings.TrimSpace(skill.SkillID) == "" {
+	skillID := strings.TrimSpace(skill.SkillID)
+	if skillID == "" {
 		return "", fmt.Errorf("%w: empty skill id", ErrPreviewUnavailable)
 	}
 
@@ -58,19 +64,16 @@ func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, er
 		apiBase = "https://api.github.com"
 	}
 
-	// Fast path.
-	primaryPath := path.Join("skills", skill.SkillID, "SKILL.md")
+	primaryPath := path.Join("skills", skillID, "SKILL.md")
 	md, status, err := fetchGitHubRaw(ctx, httpClient, rawBase, owner, repo, primaryPath)
 	if err == nil {
 		return md, nil
 	}
-
-	// Only attempt fallback on 404. Other errors should just surface.
 	if status != http.StatusNotFound {
 		return "", err
 	}
 
-	paths, treeErr := fetchGitHubTreeSkillMdPaths(ctx, httpClient, apiBase, owner, repo)
+	paths, treeErr := fetchGitHubTreeSkillMdPaths(ctx, httpClient, apiBase, owner, repo, skillID)
 	if treeErr != nil {
 		return "", fmt.Errorf("%w: %w", ErrPreviewUnavailable, treeErr)
 	}
@@ -81,7 +84,7 @@ func (c Client) FetchSkillMarkdown(ctx context.Context, skill Skill) (string, er
 			continue
 		}
 		name, ok := parseSkillNameFromFrontmatter(candidate)
-		if ok && name == skill.SkillID {
+		if ok && name == skillID {
 			return candidate, nil
 		}
 	}
@@ -95,7 +98,6 @@ func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner
 		return "", 0, fmt.Errorf("%w: %w", ErrPreviewUnavailable, err)
 	}
 
-	// /<owner>/<repo>/HEAD/<relPath>
 	u.Path = path.Join(u.Path, owner, repo, "HEAD", relPath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -120,7 +122,7 @@ func fetchGitHubRaw(ctx context.Context, httpClient *http.Client, rawBase, owner
 	return string(b), resp.StatusCode, nil
 }
 
-func fetchGitHubTreeSkillMdPaths(ctx context.Context, httpClient *http.Client, apiBase, owner, repo string) ([]string, error) {
+func fetchGitHubTreeSkillMdPaths(ctx context.Context, httpClient *http.Client, apiBase, owner, repo, skillID string) ([]string, error) {
 	u, err := url.Parse(apiBase)
 	if err != nil {
 		return nil, err
@@ -150,20 +152,46 @@ func fetchGitHubTreeSkillMdPaths(ctx context.Context, httpClient *http.Client, a
 		return nil, err
 	}
 
-	paths := make([]string, 0, 32)
+	all := make([]string, 0, 64)
 	for _, it := range decoded.Tree {
 		if it.Type != "blob" {
 			continue
 		}
-		if !strings.HasSuffix(it.Path, "SKILL.md") {
-			continue
-		}
-		// Prefer skills/* and root SKILL.md.
-		if it.Path == "SKILL.md" || strings.HasPrefix(it.Path, "skills/") {
-			paths = append(paths, it.Path)
+		if strings.EqualFold(path.Base(it.Path), "SKILL.md") {
+			all = append(all, it.Path)
 		}
 	}
-	return paths, nil
+
+	skillID = strings.TrimSpace(skillID)
+	exact := make([]string, 0, len(all))
+	priority := make([]string, 0, len(all))
+	others := make([]string, 0, len(all))
+
+	exactSuffix := "/" + skillID + "/SKILL.md"
+	for _, p := range all {
+		if skillID != "" && (p == path.Join(skillID, "SKILL.md") || strings.HasSuffix(p, exactSuffix)) {
+			exact = append(exact, p)
+			continue
+		}
+		if skilllayout.IsPrioritySkillPath(p) {
+			priority = append(priority, p)
+			continue
+		}
+		others = append(others, p)
+	}
+
+	sort.Strings(exact)
+	sort.Strings(priority)
+	sort.Strings(others)
+
+	combined := make([]string, 0, len(all))
+	combined = append(combined, exact...)
+	combined = append(combined, priority...)
+	combined = append(combined, others...)
+	if len(combined) > maxPreviewCandidates {
+		combined = combined[:maxPreviewCandidates]
+	}
+	return combined, nil
 }
 
 func parseGitHubRepo(source string) (owner, repo string, ok bool) {
@@ -172,13 +200,11 @@ func parseGitHubRepo(source string) (owner, repo string, ok bool) {
 		return "", "", false
 	}
 
-	// owner/repo shorthand
 	if shorthandRepoRe.MatchString(s) {
 		parts := strings.SplitN(s, "/", 2)
 		return parts[0], parts[1], true
 	}
 
-	// SSH form: git@github.com:owner/repo(.git)
 	if strings.HasPrefix(s, "git@github.com:") {
 		p := strings.TrimPrefix(s, "git@github.com:")
 		p = strings.TrimSuffix(p, ".git")
@@ -190,7 +216,6 @@ func parseGitHubRepo(source string) (owner, repo string, ok bool) {
 		return "", "", false
 	}
 
-	// URL-ish forms.
 	if strings.HasPrefix(s, "github.com/") {
 		s = "https://" + s
 	}
@@ -215,8 +240,7 @@ func parseGitHubRepo(source string) (owner, repo string, ok bool) {
 	}
 
 	owner = parts[0]
-	repo = parts[1]
-	repo = strings.TrimSuffix(repo, ".git")
+	repo = strings.TrimSuffix(parts[1], ".git")
 	if owner == "" || repo == "" {
 		return "", "", false
 	}

@@ -1,4 +1,4 @@
-package skillsapi
+package install
 
 import (
 	"strings"
@@ -6,14 +6,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// parseSkillNameFromFrontmatter extracts the `name` from a valid SKILL.md
-// frontmatter block. Validation is strict and requires both `name` and
-// `description` string fields.
-func parseSkillNameFromFrontmatter(md string) (string, bool) {
+type skillFrontmatter struct {
+	Name        string
+	Description string
+}
+
+func parseSkillFrontmatter(md string) (skillFrontmatter, bool) {
 	md = strings.ReplaceAll(md, "\r\n", "\n")
 	lines := strings.Split(md, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return "", false
+		return skillFrontmatter{}, false
 	}
 
 	end := -1
@@ -24,23 +26,23 @@ func parseSkillNameFromFrontmatter(md string) (string, bool) {
 		}
 	}
 	if end == -1 {
-		return "", false
+		return skillFrontmatter{}, false
 	}
 	yamlText := strings.Join(lines[1:end], "\n")
 
 	var fm map[string]any
 	if err := yaml.Unmarshal([]byte(yamlText), &fm); err != nil {
-		return "", false
+		return skillFrontmatter{}, false
 	}
 
 	name, ok := fm["name"].(string)
 	if !ok || strings.TrimSpace(name) == "" {
-		return "", false
+		return skillFrontmatter{}, false
 	}
 	description, ok := fm["description"].(string)
 	if !ok || strings.TrimSpace(description) == "" {
-		return "", false
+		return skillFrontmatter{}, false
 	}
 
-	return strings.TrimSpace(name), true
+	return skillFrontmatter{Name: strings.TrimSpace(name), Description: strings.TrimSpace(description)}, true
 }

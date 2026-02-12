@@ -61,7 +61,9 @@ Installs to:
 ```
 
 Repository layout:
-- Skulls discovers skills by scanning `skills/**/SKILL.md` and matching YAML frontmatter `name: <skill-id>`.
+- Skulls validates `SKILL.md` frontmatter with required string fields: `name` and `description`.
+- Discovery follows Vercel-style priority locations (`skills/`, `skills/.curated/`, `.agent/skills/`, `.claude/skills/`, etc.) and falls back to bounded recursive search.
+- A root `SKILL.md` is treated as a direct skill and is preferred by default.
 
 ## Development
 
