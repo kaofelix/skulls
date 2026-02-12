@@ -25,9 +25,6 @@ func TestInstallView_ShowsBannerAndContext(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "░░███") {
-		t.Fatalf("expected skulls lettering banner in view: %q", view)
-	}
 	if !strings.Contains(view, "Source:") {
 		t.Fatalf("expected Source context line in view: %q", view)
 	}

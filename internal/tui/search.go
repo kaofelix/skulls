@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -129,9 +130,13 @@ type searchModel struct {
 }
 
 const (
-	fixedListWidth      = 48
-	minPreviewPaneWidth = 30
+	fixedListWidth        = 48
+	minPreviewPaneWidth   = 30
+	terminalANSIStyleName = "skulls-terminal-ansi"
 )
+
+//go:embed styles/glamour-terminal-ansi.json
+var terminalANSIStyleJSON []byte
 
 func newSearchModel() searchModel {
 	return newSearchModelWithOptions(SearchOptions{})
@@ -150,7 +155,7 @@ func newSearchModelWithOptions(opts SearchOptions) searchModel {
 	s := spinner.New()
 	s.Spinner = spinner.Line
 
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	l := list.New([]list.Item{}, newTerminalListDelegate(), 0, 0)
 	l.SetShowHelp(false)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
@@ -534,7 +539,7 @@ func (m searchModel) previewIndicatorLine() string {
 	return lipgloss.NewStyle().
 		Width(w).
 		Align(lipgloss.Center).
-		Foreground(lipgloss.AdaptiveColor{Light: "#4a6a88", Dark: "#8aa4c8"}).
+		Faint(true).
 		Render(line)
 }
 
@@ -655,18 +660,16 @@ func (m *searchModel) ensurePreviewForSelection() tea.Cmd {
 }
 
 func renderMarkdownANSI(md string, wrap int) (string, error) {
-	// Avoid glamour's auto style here: it calls termenv.HasDarkBackground(), which
-	// queries the terminal and can cause escape sequence responses to land in the
-	// Bubble Tea text input.
-	style := strings.TrimSpace(os.Getenv("GLAMOUR_STYLE"))
-	if style == "" || strings.EqualFold(style, "auto") {
-		style = "dark"
+	style := glamourStyleFromEnv()
+
+	opts := []glamour.TermRendererOption{glamour.WithWordWrap(wrap)}
+	if style == terminalANSIStyleName {
+		opts = append(opts, glamour.WithStylesFromJSONBytes(terminalANSIStyleJSON))
+	} else {
+		opts = append(opts, glamour.WithStylePath(style))
 	}
 
-	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(style),
-		glamour.WithWordWrap(wrap),
-	)
+	r, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
 		return "", err
 	}
@@ -678,6 +681,40 @@ func renderMarkdownANSI(md string, wrap int) (string, error) {
 	// Glamour sometimes leads with newlines; drop them so content is top-aligned.
 	rendered = strings.TrimLeft(rendered, "\n")
 	return rendered, nil
+}
+
+func glamourStyleFromEnv() string {
+	// Avoid glamour's auto style here: it calls termenv.HasDarkBackground(), which
+	// queries the terminal and can cause escape sequence responses to land in the
+	// Bubble Tea text input.
+	style := strings.TrimSpace(os.Getenv("GLAMOUR_STYLE"))
+	if style == "" || strings.EqualFold(style, "auto") {
+		return terminalANSIStyleName
+	}
+	return style
+}
+
+func newTerminalListDelegate() list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+
+	d.Styles.NormalTitle = lipgloss.NewStyle().Padding(0, 0, 0, 2)
+	d.Styles.NormalDesc = d.Styles.NormalTitle.Faint(true)
+
+	selected := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(lipgloss.Color("6")).
+		Foreground(lipgloss.Color("6")).
+		Bold(true).
+		Padding(0, 0, 0, 1)
+	d.Styles.SelectedTitle = selected
+	d.Styles.SelectedDesc = selected
+
+	d.Styles.DimmedTitle = lipgloss.NewStyle().Padding(0, 0, 0, 2).Faint(true)
+	d.Styles.DimmedDesc = d.Styles.DimmedTitle
+
+	d.Styles.FilterMatch = lipgloss.NewStyle().Underline(true)
+
+	return d
 }
 
 func doSearch(client skillsapi.Client, searchFn func(context.Context, string, int) ([]skillsapi.Skill, error), query string, limit int, seq int) tea.Cmd {

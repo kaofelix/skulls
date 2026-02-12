@@ -120,12 +120,12 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m installModel) View() string {
-	banner := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	pending := lipgloss.NewStyle().Foreground(lipgloss.Color("69"))
-	bad := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	banner := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Faint(true)
+	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	pending := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	bad := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	lineStyle := lipgloss.NewStyle().Faint(true)
 
 	b := strings.Builder{}
 	b.WriteString(banner.Render(skullsBanner()))
@@ -172,14 +172,14 @@ func (m installModel) View() string {
 
 func skullsBanner() string {
 	return strings.Trim(`
-         █████                 ████  ████
-        ░░███                 ░░███ ░░███
-  █████  ░███ █████ █████ ████ ░███  ░███   █████
- ███░░   ░███░░███ ░░███ ░███  ░███  ░███  ███░░
-░░█████  ░██████░   ░███ ░███  ░███  ░███ ░░█████
- ░░░░███ ░███░░███  ░███ ░███  ░███  ░███  ░░░░███
- ██████  ████ █████ ░░████████ █████ █████ ██████
-░░░░░░  ░░░░ ░░░░░   ░░░░░░░░ ░░░░░ ░░░░░ ░░░░░░
+         █████                 ████  ████               ▄▄▄▄
+        ▒▒███                 ▒▒███ ▒▒███            ▄████████▄
+  █████  ▒███ █████ █████ ████ ▒███  ▒███   █████   ████████████
+ ███▒▒   ▒███▒▒███ ▒▒███ ▒███  ▒███  ▒███  ███▒▒   ▒██▀  ██  ▀██
+▒▒█████  ▒██████▒   ▒███ ▒███  ▒███  ▒███ ▒▒█████  ▒██  ▄██▄  ██
+ ▒▒▒▒███ ▒███▒▒███  ▒███ ▒███  ▒███  ▒███  ▒▒▒▒███  ▒████▄▄████
+ ██████  ████ █████ ▒▒████████ █████ █████ ██████    ▒██▒██▒██
+▒▒▒▒▒▒  ▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒▒     ▒▒ ▒▒ ▒▒
 `, "\n")
 }
 
