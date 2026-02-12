@@ -1,114 +1,44 @@
 # Skulls plan
 
-This project is built as **vertical slices**: each slice should be runnable end-to-end and feel like a usable increment.
+This project is built as **vertical slices**. Each slice should be runnable end-to-end and feel like a usable increment.
 
 ## Product goals
 
 - **Dead simple**: pick a target directory, install skills into it.
-- **Search-first UX**: running `skulls` with no arguments opens an interactive, full-screen search UI.
-- **Review before installing**: preview the skill’s `SKILL.md` rendered as highlighted Markdown.
+- **Search-first UX**: running `skulls` with no arguments opens an interactive full-screen search UI.
+- **Review before installing**: preview `SKILL.md` rendered as highlighted Markdown.
 
-## Non-goals (for now)
+## Status
 
-- Agent-to-directory mappings (Skulls does not care which agent you use).
-- Complex repository layouts beyond the common `skills/<skill-id>/SKILL.md` convention.
+### Completed slices
 
-## Slice 1 — Installer (done)
+1. **Installer** ✅  
+   `skulls add <source> <skill-id> [--dir <target-dir>] [--force]`
+2. **Full-screen TUI search mode** ✅  
+   `skulls [--dir <target-dir>] [--force]`
+3. **Popular-by-default** ✅
+4. **Preview pane with highlighted Markdown** ✅
+5. **Add mode source selector** ✅  
+   `skulls add <source> [skill-id] [--dir <target-dir>]`
+6. **Remember target directory** ✅  
+   - First run prompts for dir and persists it
+   - `skulls config set dir <path>`
+   - `skulls config get`
+   - `--dir` always overrides
 
-**CLI**
+## Current scope (post-slices hardening)
 
-```bash
-skulls add <source> <skill-id> --dir <target-dir> [--force]
-```
+- **Collision handling UX**: overwrite / rename / cancel.
 
-**Behavior**
-- Clone repo shallow (`git clone --depth 1`) into a temp dir.
-- Expect `skills/<skill-id>/SKILL.md`.
-- Copy `skills/<skill-id>/` → `<target-dir>/<skill-id>/` (flat layout).
-- `--force` overwrites an existing target directory.
+- **Better repo layout detection (next):**
+  - Plugin-manifest discovery parity:
+    - `.claude-plugin/marketplace.json`
+    - `.claude-plugin/plugin.json`
+  - Optional full-depth discovery flag for CLI flows (root + nested skills).
+  - Better ambiguity diagnostics when multiple paths map to the same skill name.
+  - GitHub preview fallback hardening when Trees API is truncated.
+  - Explicit subpath-first discovery mode for unusual monorepos.
+  - Additional safety checks around symlinks/path traversal during discovery.
+  - Fixture-based cross-layout test corpus.
 
-**Notes**
-- `--dir` required for now.
-
-## Slice 2 — Full-screen TUI search mode (done)
-
-**Goal**: `skulls` (no args) launches an interactive search UI.
-
-**UX**
-- Top: search input.
-- Left: results list.
-- Bottom: key hints.
-- Query length >= 2 triggers API search:
-  - `GET https://skills.sh/api/search?q=<query>&limit=10`
-- `Enter` installs the currently selected result using Slice 1 installer.
-- `Esc` quits.
-
-**Deliverable**
-- End-to-end flow: open → search → select → install.
-
-## Slice 3 — Popular-by-default (done)
-
-**Goal**: show popular skills immediately on open (empty query).
-
-**Approach**
-- Fetch `https://skills.sh`.
-- Scrape the embedded `initialSkills` list from the HTML payload.
-- Sort by `installs` descending.
-- Display top N when query is empty.
-- Switch to `/api/search` results when query length >= 2.
-
-**Tests**
-- Unit test parser against a saved HTML fixture.
-
-## Slice 4 — Preview pane with highlighted Markdown (done)
-
-**Goal**: add a right-side preview pane rendering `SKILL.md`.
-
-**UX**
-- Layout: search bar (top), list (left), preview (right).
-- On selection change: asynchronously load preview with caching.
-
-**Preview fetching (best-effort)**
-- GitHub-only for now.
-- First try raw fetch using the special ref `HEAD` (resolves to the default branch):
-  - `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/skills/<skill-id>/SKILL.md`
-- If that 404s, fall back to GitHub’s Trees API to locate `SKILL.md` files and match by frontmatter `name`.
-- If it still fails: show “Preview unavailable”; allow install anyway (clone will still work).
-
-**Rendering**
-- Render Markdown → ANSI using Glamour.
-
-## Slice 5 — Add mode source selector (done)
-
-**Goal**: enable installing from a source repo without requiring a skill id upfront.
-
-**UX**
-- Direct install still works:
-  - `skulls add <source> <skill-id> --dir <target-dir>`
-- If skill id is omitted, open an interactive selector sourced from the repository:
-  - `skulls add <source> --dir <target-dir>`
-- Selector supports local filtering and previewing `SKILL.md`.
-
-**Behavior**
-- Discover skills by scanning `skills/**/SKILL.md` and parsing frontmatter `name`.
-- For selector mode, use discovered skills as data source and read preview markdown directly from discovered `SKILL.md` files.
-- Install by matching selected/frontmatter name.
-- Add mode overwrites existing target skill directories.
-
-## Slice 6 — Remember the target directory
-
-**Goal**: don’t require `--dir` every time.
-
-**UX**
-- First run without configured dir: prompt for install dir and persist it.
-- Commands:
-  - `skulls config set dir <path>`
-  - `skulls config get`
-- `--dir` always overrides.
-
-## Hardening / polish (post-slices)
-
-- Collision handling: overwrite / rename / cancel.
-- Better repo layout detection for non-GitHub sources and non-standard layouts beyond `skills/**/SKILL.md`.
-- Support more source formats safely.
-- Telemetry: likely no (unless explicitly desired).
+- **Support additional source formats safely**.
