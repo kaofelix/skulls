@@ -1,6 +1,6 @@
 # binaries
-skulls
-skulls.exe
+/skulls
+/skulls.exe
 
 # go
 *.test
