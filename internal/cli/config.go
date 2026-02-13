@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +13,6 @@ type configFile struct {
 	Dir string `json:"dir"`
 }
 
-var promptForInstallDir = defaultPromptForInstallDir
 var configPathFunc = defaultConfigPath
 
 func runConfig(args []string) int {
@@ -52,27 +49,6 @@ func runConfig(args []string) int {
 		fmt.Fprint(os.Stderr, "Usage: skulls config set dir <path> | skulls config get\n")
 		return 2
 	}
-}
-
-func resolveInstallDir(flagValue string) (string, error) {
-	if v := strings.TrimSpace(flagValue); v != "" {
-		return v, nil
-	}
-
-	if configured, ok, err := getInstallDir(); err != nil {
-		return "", err
-	} else if ok {
-		return configured, nil
-	}
-
-	v, err := promptForInstallDir()
-	if err != nil {
-		return "", err
-	}
-	if err := setInstallDir(v); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(v), nil
 }
 
 func getInstallDir() (string, bool, error) {
@@ -130,19 +106,4 @@ func defaultConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(base, "skulls", "config.json"), nil
-}
-
-func defaultPromptForInstallDir() (string, error) {
-	fmt.Fprint(os.Stderr, "Install dir not configured. Enter install directory: ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		if strings.TrimSpace(line) == "" {
-			return "", err
-		}
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return "", fmt.Errorf("dir must be non-empty")
-	}
-	return line, nil
 }

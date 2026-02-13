@@ -343,36 +343,20 @@ func TestRun_ConfigSetAndGetDir(t *testing.T) {
 	}
 }
 
-func TestRun_NoArgs_WhenDirNotConfigured_PromptsAndPersists(t *testing.T) {
+func TestRun_NoArgs_WhenDirNotConfigured_ReturnsHelpfulError(t *testing.T) {
 	useTestConfigPath(t)
-
-	origPrompt := promptForInstallDir
-	origSearch := runSearchUI
-	t.Cleanup(func() {
-		promptForInstallDir = origPrompt
-		runSearchUI = origSearch
-	})
-
-	promptForInstallDir = func() (string, error) {
-		return "/tmp/prompted-skills", nil
-	}
-	runSearchUI = func() (tuiSearchResult, error) {
-		return tuiSearchResult{Selected: false}, nil
-	}
 
 	_, errBuf, restore := captureStdoutStderr(t)
 	exit := Run([]string{})
 	restore()
-	if exit != 0 {
+	if exit != 2 {
 		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
 	}
-
-	dir, ok, err := getInstallDir()
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(errBuf.String(), "install dir is not configured") {
+		t.Fatalf("expected missing-dir error, got: %q", errBuf.String())
 	}
-	if !ok || dir != "/tmp/prompted-skills" {
-		t.Fatalf("got dir=%q ok=%v", dir, ok)
+	if !strings.Contains(errBuf.String(), "skulls config set dir") {
+		t.Fatalf("expected config guidance, got: %q", errBuf.String())
 	}
 }
 
@@ -400,6 +384,63 @@ func TestRunAdd_DirFlagOverridesConfiguredDir(t *testing.T) {
 	}
 	if gotTarget != "/tmp/flag-skills" {
 		t.Fatalf("target=%q", gotTarget)
+	}
+}
+
+func TestRunAdd_WhenNoConfigAndDirFlag_ShowsTipToPersistDir(t *testing.T) {
+	useTestConfigPath(t)
+
+	origInstallUI := runAddInstallUI
+	t.Cleanup(func() { runAddInstallUI = origInstallUI })
+
+	runAddInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	outBuf, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"add", "owner/repo", "my-skill", "--dir", "/tmp/flag-skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	out := outBuf.String()
+	if !strings.Contains(out, "☠️ Tip") {
+		t.Fatalf("expected tip box, got: %q", out)
+	}
+	if !strings.Contains(out, "skulls config set dir \"/tmp/flag-skills\"") {
+		t.Fatalf("expected persist command, got: %q", out)
+	}
+}
+
+func TestRunAdd_WhenConfiguredAndDirFlagDiffers_ShowsOverrideTip(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := setInstallDir("/tmp/saved-skills"); err != nil {
+		t.Fatal(err)
+	}
+
+	origInstallUI := runAddInstallUI
+	t.Cleanup(func() { runAddInstallUI = origInstallUI })
+
+	runAddInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	outBuf, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"add", "owner/repo", "my-skill", "--dir", "/tmp/flag-skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	out := outBuf.String()
+	if !strings.Contains(out, "Default dir is /tmp/saved-skills") {
+		t.Fatalf("expected default-dir reminder, got: %q", out)
+	}
+	if !strings.Contains(out, "This install used /tmp/flag-skills") {
+		t.Fatalf("expected override-dir reminder, got: %q", out)
+	}
+	if !strings.Contains(out, "skulls config set dir \"/tmp/flag-skills\"") {
+		t.Fatalf("expected change-default command, got: %q", out)
 	}
 }
 
@@ -435,6 +476,34 @@ func TestRunSearch_DirFlagOverridesConfiguredDir(t *testing.T) {
 	}
 	if gotTarget != "/tmp/flag-skills" {
 		t.Fatalf("target=%q", gotTarget)
+	}
+}
+
+func TestRunSearch_WhenNoConfigAndDirFlag_ShowsTipToPersistDir(t *testing.T) {
+	useTestConfigPath(t)
+
+	origSearch := runSearchUI
+	origInstall := runSearchInstallUI
+	t.Cleanup(func() {
+		runSearchUI = origSearch
+		runSearchInstallUI = origInstall
+	})
+
+	runSearchUI = func() (tuiSearchResult, error) {
+		return tuiSearchResult{Selected: true, Skill: tuiSkill{Source: "owner/repo", SkillID: "chosen-skill"}}, nil
+	}
+	runSearchInstallUI = func(targetDir string, force bool, skill tuiSkill) (tuiInstallResult, error) {
+		return tuiInstallResult{InstalledPath: "/tmp/installed"}, nil
+	}
+
+	outBuf, errBuf, restore := captureStdoutStderr(t)
+	exit := Run([]string{"--dir", "/tmp/flag-skills"})
+	restore()
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
+	}
+	if !strings.Contains(outBuf.String(), "skulls config set dir \"/tmp/flag-skills\"") {
+		t.Fatalf("expected persist tip, got: %q", outBuf.String())
 	}
 }
 

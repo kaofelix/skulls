@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kaofelix/skulls/internal/install"
 	"github.com/kaofelix/skulls/internal/skillsapi"
 	"github.com/kaofelix/skulls/internal/tui"
@@ -137,7 +139,7 @@ func runAdd(args []string) int {
 		return 2
 	}
 
-	targetDir, err := resolveInstallDir(parsed.TargetDir)
+	targetDir, dirCtx, err := resolveInstallDirForRun(parsed.TargetDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
@@ -180,6 +182,7 @@ func runAdd(args []string) int {
 				return 1
 			}
 			printInstallSuccess(skillID, source, installedPath)
+			printInstallTip(dirCtx, targetDir)
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -191,6 +194,7 @@ func runAdd(args []string) int {
 	}
 
 	printInstallSuccess(skillID, source, installRes.InstalledPath)
+	printInstallTip(dirCtx, targetDir)
 	return 0
 }
 
@@ -274,7 +278,7 @@ func runSearch(args []string) int {
 		fmt.Fprint(os.Stderr, "Usage: skulls [--dir <target-dir>] [--force]\n")
 		return 0
 	}
-	targetDir, err := resolveInstallDir(parsed.TargetDir)
+	targetDir, dirCtx, err := resolveInstallDirForRun(parsed.TargetDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
@@ -300,7 +304,117 @@ func runSearch(args []string) int {
 	}
 
 	printInstallSuccess(searchRes.Skill.SkillID, searchRes.Skill.Source, installRes.InstalledPath)
+	printInstallTip(dirCtx, targetDir)
 	return 0
+}
+
+type installDirContext struct {
+	UsedFlag      bool
+	HasConfigured bool
+	ConfiguredDir string
+}
+
+func resolveInstallDirForRun(flagValue string) (string, installDirContext, error) {
+	ctx := installDirContext{}
+
+	if configured, ok, err := getInstallDir(); err != nil {
+		return "", ctx, err
+	} else if ok {
+		ctx.HasConfigured = true
+		ctx.ConfiguredDir = configured
+	}
+
+	if v := strings.TrimSpace(flagValue); v != "" {
+		ctx.UsedFlag = true
+		return v, ctx, nil
+	}
+	if ctx.HasConfigured {
+		return ctx.ConfiguredDir, ctx, nil
+	}
+
+	return "", ctx, fmt.Errorf("install dir is not configured yet ☠️\nUse --dir <target-dir> for this run, or set a default:\n  skulls config set dir <path>")
+}
+
+func printInstallTip(ctx installDirContext, targetDir string) {
+	if !ctx.UsedFlag {
+		return
+	}
+	cmd := fmt.Sprintf("skulls config set dir %s", strconv.Quote(strings.TrimSpace(targetDir)))
+	if !ctx.HasConfigured {
+		printTipBox(
+			[]string{
+				fmt.Sprintf("Installed to %s for this run.", compactPath(targetDir)),
+				"Want to make it your default install dir?",
+			},
+			cmd,
+		)
+		return
+	}
+	if samePath(ctx.ConfiguredDir, targetDir) {
+		return
+	}
+	printTipBox(
+		[]string{
+			fmt.Sprintf("Default dir is %s.", compactPath(ctx.ConfiguredDir)),
+			fmt.Sprintf("This install used %s.", compactPath(targetDir)),
+			"To make this your new default:",
+		},
+		cmd,
+	)
+}
+
+func printTipBox(lines []string, command string) {
+	if len(lines) == 0 && strings.TrimSpace(command) == "" {
+		return
+	}
+	color := shouldUseTipColor()
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1)
+	cmdStyle := lipgloss.NewStyle().Bold(true)
+
+	if color {
+		titleStyle = titleStyle.Foreground(lipgloss.Color("6"))
+		boxStyle = boxStyle.BorderForeground(lipgloss.Color("8"))
+		cmdStyle = cmdStyle.Foreground(lipgloss.Color("6"))
+	}
+
+	body := make([]string, 0, len(lines)+2)
+	body = append(body, titleStyle.Render("☠️ Tip"))
+	body = append(body, lines...)
+	if strings.TrimSpace(command) != "" {
+		body = append(body, "  "+cmdStyle.Render(command))
+	}
+
+	fmt.Println()
+	fmt.Println(boxStyle.Render(strings.Join(body, "\n")))
+}
+
+func shouldUseTipColor() bool {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func samePath(a string, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	aAbs, aErr := filepath.Abs(a)
+	bAbs, bErr := filepath.Abs(b)
+	if aErr != nil || bErr != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(aAbs) == filepath.Clean(bAbs)
 }
 
 func printInstallSuccess(skillID string, source string, installedPath string) {

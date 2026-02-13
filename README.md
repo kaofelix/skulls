@@ -23,7 +23,8 @@ skulls [--dir <target-dir>] [--force]
 
 Behavior:
 - If `--dir` is omitted, skulls uses the saved install directory from config.
-- On first run without a saved directory, skulls prompts for one and persists it.
+- If no saved directory exists, pass `--dir <target-dir>` for one-off installs or set a default with `skulls config set dir <path>`.
+- After installs that use `--dir`, skulls prints a friendly tip on how to persist that directory as your default.
 - Empty query shows popular skills.
 - Queries with length >= 2 search via `https://skills.sh/api/search`.
 - The right pane previews the selected skill's `SKILL.md` (best-effort; GitHub sources only).
