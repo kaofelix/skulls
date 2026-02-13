@@ -4,6 +4,15 @@ Dead simple skills 💀
 
 `skulls` installs skills from git repositories into a target directory.
 
+## Install
+
+### Homebrew
+
+```bash
+brew tap kaofelix/tap
+brew install skulls
+```
+
 ## Commands
 
 ### Interactive search
@@ -100,3 +109,46 @@ What it does:
 
 Notes:
 - The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you'll need to re-stage and commit again.
+
+### Release process (Git tag + Homebrew tap)
+
+1. Create and push a release tag in this repo:
+
+```bash
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
+```
+
+2. Create the GitHub release:
+
+```bash
+gh release create v0.1.1 --title "v0.1.1" --generate-notes
+```
+
+3. Update Homebrew formula in the tap repo using the helper script:
+
+```bash
+./scripts/update-homebrew-formula.sh v0.1.1 ../homebrew-tap
+```
+
+This downloads the release tarball, computes SHA256, and writes:
+
+- `../homebrew-tap/Formula/skulls.rb`
+
+4. Commit and push the tap changes:
+
+```bash
+cd ../homebrew-tap
+git add Formula/skulls.rb
+git commit -m "skulls v0.1.1"
+git push
+```
+
+5. Verify installation:
+
+```bash
+brew update
+brew tap kaofelix/tap
+brew reinstall skulls
+skulls --help
+```
