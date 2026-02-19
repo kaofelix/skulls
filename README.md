@@ -2,82 +2,139 @@
 
 Dead simple skills 💀
 
-`skulls` installs skills from git repositories into a target directory.
+Install AI agent skills from git repositories into a directory you control.
+
+## Why skulls?
+
+Skulls is a simpler alternative to [Vercel's skills client](https://github.com/vercel-labs/skills). Vercel's client does a lot: it installs skills into multiple agent-specific directories and manages symlinks to keep them in sync.
+
+I wanted something more straightforward:
+
+1. **Point to a directory** — that's where skills go
+2. **Install skills** — they're just folders with a `SKILL.md`
+3. **Done** — no symlinks, no magic, no surprises
+
+Most coding agents let you configure custom skill directories anyway. If you need symlinks for multiple agents, you can manage that yourself and know exactly what's happening.
 
 ## Install
-
-### Homebrew
 
 ```bash
 brew tap kaofelix/tap
 brew install skulls
 ```
 
-## Commands
+## Quick Start
 
-### Interactive search
+**1. Set your skills directory (once):**
 
 ```bash
-skulls [--dir <target-dir>] [--force]
+skulls config set dir ~/.pi/agent/skills
 ```
 
-Behavior:
-- If `--dir` is omitted, skulls uses the saved install directory from config.
-- If no saved directory exists, pass `--dir <target-dir>` for one-off installs or set a default with `skulls config set dir <path>`.
-- After installs that use `--dir`, skulls prints a friendly tip on how to persist that directory as your default.
-- Empty query shows popular skills.
-- Queries with length >= 2 search via `https://skills.sh/api/search`.
-- The right pane previews the selected skill's `SKILL.md` (best-effort; GitHub sources only).
-- `Enter` installs the selected skill. `Esc` quits.
-
-### Add (direct install / source selector)
+**2. Search and install:**
 
 ```bash
-# direct install
-skulls add <source> <skill-id> [--dir <target-dir>]
-
-# shorthand direct install
-skulls add owner/repo@skill-id [--dir <target-dir>]
-
-# interactive selector (when skill-id is omitted)
-skulls add <source> [--dir <target-dir>]
+skulls
 ```
 
-`<source>` formats:
-- `owner/repo` (GitHub shorthand)
-- a git remote URL (`https://...`, `git@...`, `file:///...`)
-- a local path to a git repo
+This opens an interactive search UI. Type to search, use arrow keys to browse, and press Enter to install.
 
-Notes:
-- When `<skill-id>` is omitted, skulls discovers `skills/**/SKILL.md` in the source and opens an interactive selector.
-- In add mode, installs overwrite existing target skill folders.
-- `--dir` always overrides the saved config value.
+That's it. Your skill is now in `~/.pi/agent/skills/<skill-name>/`.
 
-### Config
+## Usage
+
+### Interactive Search
 
 ```bash
-skulls config set dir <path>
+skulls
+```
+
+Opens a full-screen TUI where you can:
+
+- **Search** skills from [skills.sh](https://skills.sh) (type at least 2 characters)
+- **Browse popular** skills (shown by default when the search is empty)
+- **Preview** the selected skill's `SKILL.md` in the right pane
+- **Install** with Enter, quit with Esc
+
+Navigation:
+- `↑`/`↓` — select skill
+- `Enter` — install selected skill
+- `Esc` or `Ctrl+C` — quit
+- `PgUp`/`PgDown`, `Ctrl+U`/`Ctrl+D` — scroll preview
+
+### Direct Install
+
+When you know exactly what you want:
+
+```bash
+# Install a specific skill from a repo
+skulls add owner/repo skill-id
+
+# Shorthand (same as above)
+skulls add owner/repo@skill-id
+
+# Examples
+skulls add anthropics/skills pdf
+skulls add obra/superpowers@test-driven-development
+```
+
+When you want to browse a repo's skills:
+
+```bash
+# Opens interactive selector for skills in the repo
+skulls add owner/repo
+skulls add https://github.com/owner/repo.git
+skulls add ./local/repo
+```
+
+### Configuration
+
+```bash
+# Set default install directory
+skulls config set dir ~/.pi/agent/skills
+
+# View current config
 skulls config get
 ```
 
-## Install layout
+The `--dir` flag overrides the saved directory for a single install:
 
-Installs to:
-
-```
-<target-dir>/<skill-id>/
-  SKILL.md
-  ...
+```bash
+skulls --dir /tmp/test-skills
+skulls add owner/repo skill-id --dir /tmp/test-skills
 ```
 
-Repository layout:
-- Skulls validates `SKILL.md` frontmatter with required string fields: `name` and `description`.
-- Discovery follows Vercel-style priority locations (`skills/`, `skills/.curated/`, `.agent/skills/`, `.claude/skills/`, etc.) and falls back to bounded recursive search.
-- A root `SKILL.md` is treated as a direct skill and is preferred by default.
+### Overwriting Existing Skills
+
+By default, skulls won't overwrite an existing skill folder. Use `--force` to replace it:
+
+```bash
+skulls --force
+skulls add owner/repo skill-id --force
+```
+
+## How Skills Are Found
+
+Skulls discovers skills in repositories using a priority-based search:
+
+1. **Root `SKILL.md`** — if the repo itself is a skill
+2. **Standard directories** — `skills/`, `.claude/skills/`, `.agent/skills/`, and [20+ other common locations](https://github.com/vercel-labs/skills)
+3. **Recursive fallback** — searches up to 5 levels deep
+
+A valid skill requires a `SKILL.md` with YAML frontmatter containing `name` and `description`:
+
+```markdown
+---
+name: my-skill
+description: What this skill does
+---
+
+# My Skill
+
+Instructions for the AI agent...
+```
 
 ## Development
-
-### Makefile
 
 ```bash
 make build    # build ./skulls binary
@@ -87,73 +144,34 @@ make clean    # remove the binary
 make install  # install to GOPATH/bin
 ```
 
-### Git hooks (format + lint + test)
+### Git Hooks
 
-This repo uses [prek](https://prek.j178.dev/) (pre-commit compatible).
-
-Install tools:
+This repo uses [prek](https://prek.j178.dev/) for pre-commit hooks:
 
 ```bash
-# option 1
+# Install linter
 brew install golangci-lint
 
-# option 2
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-```
-
-One-time setup per clone:
-
-```bash
+# Set up hooks (once per clone)
 ./scripts/install-hooks.sh
 ```
 
-What it does:
-- Installs **pre-commit** and **pre-push** git hooks via `prek`.
-- On commit: runs `gofmt` (auto-fix), `golangci-lint run`, and `go test ./...`.
-- On push: runs `go test ./...`.
-
-Notes:
-- The `gofmt` hook will auto-format files. If it modifies files, your commit may be stopped and you'll need to re-stage and commit again.
-
-### Release process (Git tag + Homebrew tap)
-
-1. Create and push a release tag in this repo:
+### Release Process
 
 ```bash
+# 1. Tag and push
 git tag -a v0.1.1 -m "v0.1.1"
 git push origin v0.1.1
-```
 
-2. Create the GitHub release:
-
-```bash
+# 2. Create GitHub release
 gh release create v0.1.1 --title "v0.1.1" --generate-notes
-```
 
-3. Update Homebrew formula in the tap repo using the helper script:
-
-```bash
+# 3. Update Homebrew formula
 ./scripts/update-homebrew-formula.sh v0.1.1 ../homebrew-tap
-```
 
-This downloads the release tarball, computes SHA256, and writes:
-
-- `../homebrew-tap/Formula/skulls.rb`
-
-4. Commit and push the tap changes:
-
-```bash
+# 4. Push tap changes
 cd ../homebrew-tap
 git add Formula/skulls.rb
 git commit -m "skulls v0.1.1"
 git push
-```
-
-5. Verify installation:
-
-```bash
-brew update
-brew tap kaofelix/tap
-brew reinstall skulls
-skulls --help
 ```
