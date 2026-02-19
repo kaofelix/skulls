@@ -77,10 +77,14 @@ Repository layout:
 
 ## Development
 
-### Build
+### Makefile
 
 ```bash
-go build ./cmd/skulls
+make build    # build ./skulls binary
+make test     # run all tests
+make lint     # run golangci-lint
+make clean    # remove the binary
+make install  # install to GOPATH/bin
 ```
 
 ### Git hooks (format + lint + test)

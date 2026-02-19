@@ -27,3 +27,14 @@ This repository is built in **vertical slices** (see [PLAN.md](./PLAN.md)). For 
 5. **Commits**
    - Do **not** commit by default.
    - **Only commit when the user explicitly asks**.
+
+## Development commands
+
+Use the Makefile for common tasks:
+
+```bash
+make build    # build ./skulls binary
+make test     # run all tests
+make lint     # run golangci-lint
+make clean    # remove the binary
+```
