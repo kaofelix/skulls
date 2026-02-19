@@ -352,11 +352,21 @@ func TestRun_NoArgs_WhenDirNotConfigured_ReturnsHelpfulError(t *testing.T) {
 	if exit != 2 {
 		t.Fatalf("exit=%d stderr=%s", exit, errBuf.String())
 	}
-	if !strings.Contains(errBuf.String(), "install dir is not configured") {
-		t.Fatalf("expected missing-dir error, got: %q", errBuf.String())
+	output := errBuf.String()
+	if !strings.Contains(output, "Ooops") {
+		t.Fatalf("expected 'Ooops' header, got: %q", output)
 	}
-	if !strings.Contains(errBuf.String(), "skulls config set dir") {
-		t.Fatalf("expected config guidance, got: %q", errBuf.String())
+	if !strings.Contains(output, "install dir not configured yet") {
+		t.Fatalf("expected 'install dir not configured yet', got: %q", output)
+	}
+	if !strings.Contains(output, "Use --dir <path> for a one-time install") {
+		t.Fatalf("expected --dir option, got: %q", output)
+	}
+	if !strings.Contains(output, "Or set a default") {
+		t.Fatalf("expected 'Or set a default', got: %q", output)
+	}
+	if !strings.Contains(output, "skulls config set dir <path>") {
+		t.Fatalf("expected config command, got: %q", output)
 	}
 }
 

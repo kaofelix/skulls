@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/kaofelix/skulls/internal/skillsapi"
 	"github.com/kaofelix/skulls/internal/tui"
 )
+
+var errInstallDirNotConfigured = errors.New("install dir not configured")
 
 type tuiSearchResult = tui.SearchResult
 type tuiInstallResult = tui.InstallResult
@@ -141,7 +144,11 @@ func runAdd(args []string) int {
 
 	targetDir, dirCtx, err := resolveInstallDirForRun(parsed.TargetDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if errors.Is(err, errInstallDirNotConfigured) {
+			printInstallDirNotConfiguredError()
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 		return 2
 	}
 
@@ -280,7 +287,11 @@ func runSearch(args []string) int {
 	}
 	targetDir, dirCtx, err := resolveInstallDirForRun(parsed.TargetDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if errors.Is(err, errInstallDirNotConfigured) {
+			printInstallDirNotConfiguredError()
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 		return 2
 	}
 
@@ -332,7 +343,7 @@ func resolveInstallDirForRun(flagValue string) (string, installDirContext, error
 		return ctx.ConfiguredDir, ctx, nil
 	}
 
-	return "", ctx, fmt.Errorf("install dir is not configured yet ☠️\nUse --dir <target-dir> for this run, or set a default:\n  skulls config set dir <path>")
+	return "", ctx, errInstallDirNotConfigured
 }
 
 func printInstallTip(ctx installDirContext, targetDir string) {
@@ -390,6 +401,35 @@ func printTipBox(lines []string, command string) {
 
 	fmt.Println()
 	fmt.Println(boxStyle.Render(strings.Join(body, "\n")))
+}
+
+func printInstallDirNotConfiguredError() {
+	color := shouldUseErrorColor()
+
+	headerStyle := lipgloss.NewStyle().Bold(true)
+	cmdStyle := lipgloss.NewStyle().Bold(true)
+
+	if color {
+		headerStyle = headerStyle.Foreground(lipgloss.Color("3")) // yellow
+		cmdStyle = cmdStyle.Foreground(lipgloss.Color("6"))       // cyan
+	}
+
+	fmt.Fprintln(os.Stderr, headerStyle.Render("Ooops:")+" install dir not configured yet")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  • Use --dir <path> for a one-time install")
+	fmt.Fprintln(os.Stderr, "  • Or set a default:")
+	fmt.Fprintln(os.Stderr, "      "+cmdStyle.Render("skulls config set dir <path>"))
+}
+
+func shouldUseErrorColor() bool {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return false
+	}
+	fi, err := os.Stderr.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func shouldUseTipColor() bool {
