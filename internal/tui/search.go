@@ -234,6 +234,12 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// If we already have preview markdown, re-render for the new width.
 		m.rerenderPreview()
 
+		// If we have a selection but no preview loaded yet, trigger a preview load.
+		// This handles the race where Init()'s preview command hasn't completed yet.
+		if m.selectedKey() != "" && m.previewMarkdown == "" && !m.previewLoading {
+			return m, m.ensurePreviewForSelection()
+		}
+
 		return m, nil
 
 	case tea.MouseMsg:
