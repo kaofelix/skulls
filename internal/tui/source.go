@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kaofelix/skulls/internal/install"
@@ -39,10 +41,23 @@ func RunSearchFromSource(source string) (SearchResult, error) {
 		return string(b), nil
 	}
 
+	openTarget := func(_ context.Context, skill skillsapi.Skill) (string, error) {
+		p, ok := filesBySkill[strings.TrimSpace(skill.SkillID)]
+		if !ok {
+			return "", skillsapi.ErrPreviewUnavailable
+		}
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			return "", err
+		}
+		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String(), nil
+	}
+
 	return RunSearchWithOptions(SearchOptions{
-		InitialSkills: skills,
-		Placeholder:   "Filter skills…",
-		StatusHint:    "Filter repository skills • Enter to install • Esc to quit",
-		PreviewFunc:   preview,
+		InitialSkills:  skills,
+		Placeholder:    "Filter skills…",
+		StatusHint:     "Filter repository skills • Enter to install • Ctrl+O to open path • Esc to quit",
+		PreviewFunc:    preview,
+		OpenTargetFunc: openTarget,
 	})
 }

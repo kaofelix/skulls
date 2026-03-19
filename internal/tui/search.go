@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/kaofelix/skulls/internal/openutil"
 	"github.com/kaofelix/skulls/internal/skillsapi"
 )
 
@@ -26,11 +27,12 @@ type SearchResult struct {
 }
 
 type SearchOptions struct {
-	InitialSkills []skillsapi.Skill
-	Placeholder   string
-	StatusHint    string
-	SearchFunc    func(context.Context, string, int) ([]skillsapi.Skill, error)
-	PreviewFunc   func(context.Context, skillsapi.Skill) (string, error)
+	InitialSkills  []skillsapi.Skill
+	Placeholder    string
+	StatusHint     string
+	SearchFunc     func(context.Context, string, int) ([]skillsapi.Skill, error)
+	PreviewFunc    func(context.Context, skillsapi.Skill) (string, error)
+	OpenTargetFunc func(context.Context, skillsapi.Skill) (string, error)
 }
 
 // RunSearch runs the interactive search UI in the alt screen and returns the selected skill.
@@ -90,19 +92,26 @@ type previewResultMsg struct {
 	err error
 }
 
+type openResultMsg struct {
+	target string
+	err    error
+}
+
 type searchModel struct {
 	client skillsapi.Client
 
-	input       textinput.Model
-	results     list.Model
-	allItems    []list.Item
-	searchSeq   int
-	searching   bool
-	searchErr   error
-	spinner     spinner.Model
-	statusHint  string
-	searchFunc  func(context.Context, string, int) ([]skillsapi.Skill, error)
-	previewFunc func(context.Context, skillsapi.Skill) (string, error)
+	input          textinput.Model
+	results        list.Model
+	allItems       []list.Item
+	searchSeq      int
+	searching      bool
+	searchErr      error
+	spinner        spinner.Model
+	statusHint     string
+	statusMessage  string
+	searchFunc     func(context.Context, string, int) ([]skillsapi.Skill, error)
+	previewFunc    func(context.Context, skillsapi.Skill) (string, error)
+	openTargetFunc func(context.Context, skillsapi.Skill) (string, error)
 
 	popularLoading bool
 	popularErr     error
@@ -134,6 +143,8 @@ const (
 	minPreviewPaneWidth   = 30
 	terminalANSIStyleName = "skulls-terminal-ansi"
 )
+
+var openExternalTarget = openutil.Open
 
 //go:embed styles/glamour-terminal-ansi.json
 var terminalANSIStyleJSON []byte
@@ -179,6 +190,7 @@ func newSearchModelWithOptions(opts SearchOptions) searchModel {
 		statusHint:     strings.TrimSpace(opts.StatusHint),
 		searchFunc:     opts.SearchFunc,
 		previewFunc:    opts.PreviewFunc,
+		openTargetFunc: opts.OpenTargetFunc,
 		previewCache:   map[string]string{},
 		previewVP:      viewport.New(0, 0),
 	}
@@ -243,6 +255,7 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		m.statusMessage = ""
 		oldSelKey := m.selectedKey()
 
 		// If scrolling in the preview pane, scroll preview instead of the list.
@@ -270,6 +283,8 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.result = SearchResult{Selected: true, Skill: it.s}
 				return m, tea.Quit
 			}
+		case "ctrl+o":
+			return m, m.openSelectedSkill()
 		}
 
 		// Preview scrolling (keep list navigation separate).
@@ -295,6 +310,8 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+
+		m.statusMessage = ""
 
 		oldQuery := m.input.Value()
 		oldSelKey := m.selectedKey()
@@ -417,6 +434,14 @@ func (m searchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rerenderPreview()
 		return m, nil
 
+	case openResultMsg:
+		if msg.err != nil {
+			m.statusMessage = "Open failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.statusMessage = "Opened: " + msg.target
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -430,12 +455,15 @@ func (m searchModel) View() string {
 	q := strings.TrimSpace(m.input.Value())
 	var status string
 
-	if len(m.allItems) > 0 {
+	switch {
+	case m.statusMessage != "":
+		status = m.statusMessage
+	case len(m.allItems) > 0:
 		status = m.statusHint
 		if status == "" {
-			status = "Filter skills • Enter to install • Esc to quit"
+			status = "Filter skills • Enter to install • Ctrl+O to open path • Esc to quit"
 		}
-	} else {
+	default:
 		switch {
 		case q == "":
 			switch {
@@ -444,10 +472,10 @@ func (m searchModel) View() string {
 			case m.popularErr != nil:
 				status = "Error loading popular: " + m.popularErr.Error()
 			default:
-				status = "Popular • Type to search • Enter to install • Esc to quit"
+				status = "Popular • Type to search • Enter to install • Ctrl+O to open path • Esc to quit"
 			}
 		case len([]rune(q)) < 2:
-			status = "Type at least 2 characters to search."
+			status = "Type at least 2 characters to search. Ctrl+O opens the selected skill path."
 		default:
 			switch {
 			case m.searching:
@@ -455,7 +483,7 @@ func (m searchModel) View() string {
 			case m.searchErr != nil:
 				status = "Error: " + m.searchErr.Error()
 			default:
-				status = "Enter to install • Esc to quit"
+				status = "Enter to install • Ctrl+O to open path • Esc to quit"
 			}
 		}
 	}
@@ -665,6 +693,14 @@ func (m *searchModel) ensurePreviewForSelection() tea.Cmd {
 	return doPreview(m.client, m.previewFunc, s, key, seq)
 }
 
+func (m *searchModel) openSelectedSkill() tea.Cmd {
+	s, ok := m.selectedSkill()
+	if !ok {
+		return nil
+	}
+	return doOpen(m.client, m.openTargetFunc, s)
+}
+
 func renderMarkdownANSI(md string, wrap int) (string, error) {
 	style := glamourStyleFromEnv()
 
@@ -758,5 +794,22 @@ func doPreview(client skillsapi.Client, previewFn func(context.Context, skillsap
 		}
 		md, err := fn(ctx, skill)
 		return previewResultMsg{seq: seq, key: key, md: md, err: err}
+	}
+}
+
+func doOpen(client skillsapi.Client, openTargetFn func(context.Context, skillsapi.Skill) (string, error), skill skillsapi.Skill) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+
+		fn := openTargetFn
+		if fn == nil {
+			fn = client.BrowserURLForSkill
+		}
+		target, err := fn(ctx, skill)
+		if err != nil {
+			return openResultMsg{target: target, err: err}
+		}
+		return openResultMsg{target: target, err: openExternalTarget(target)}
 	}
 }
